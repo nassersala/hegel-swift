@@ -1,6 +1,6 @@
 # hegel-swift
 
-Property-based testing for Swift, built on [Hegel](https://hegel.dev) — [Antithesis](https://antithesis.com)'s universal PBT engine, itself built on [Hypothesis](https://hypothesis.readthedocs.io) by the Hypothesis developers. (The name is a philosophy joke: Antithesis → Hegel.)
+Property-based testing for Swift, built on [Hegel](https://hegel.dev) 
 
 ```swift
 import Hegel
