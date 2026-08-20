@@ -11,7 +11,11 @@ import CHegel
 /// produced them) and generator-shaped: replaying a blob through a
 /// *different* generator than the one that failed overruns or produces an
 /// unrelated value.
-public func replay<A>(_ gen: Gen<A>, blob: String) throws -> A {
+public func replay<A>(
+    _ gen: Gen<A>,
+    blob: String,
+    output: ((String) -> Void)? = nil
+) throws -> A {
     let ctx = Context()
 
     var settings: OpaquePointer?
@@ -20,8 +24,19 @@ public func replay<A>(_ gen: Gen<A>, blob: String) throws -> A {
     // Hermetic: replay must not touch the example database.
     try check(hegel_settings_set_database(ctx.raw, settings, ""), ctx.lastError)
 
+    // Unlike a run's callback, this one is only invoked during the call
+    // below and need not outlive it.
+    let outputBox = output.map(OutputBox.init)
     var rawCase: OpaquePointer?
-    try check(hegel_test_case_from_blob(ctx.raw, settings, blob, nil, nil, &rawCase), ctx.lastError)
+    try withExtendedLifetime(outputBox) {
+        try check(
+            hegel_test_case_from_blob(
+                ctx.raw, settings, blob,
+                outputBox == nil ? nil : outputTrampoline,
+                outputBox.map { Unmanaged.passUnretained($0).toOpaque() },
+                &rawCase),
+            ctx.lastError)
+    }
     defer { _ = hegel_test_case_free(ctx.raw, rawCase) }
 
     let tc = TestCase(ctx: ctx, raw: rawCase!)

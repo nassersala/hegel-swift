@@ -1,5 +1,22 @@
 import CHegel
 
+/// Carries a Swift closure across the C callback boundary. The trampoline
+/// below recovers it from the `user_data` pointer.
+final class OutputBox {
+    let handler: (String) -> Void
+    init(_ handler: @escaping (String) -> Void) { self.handler = handler }
+}
+
+/// The C-convention trampoline libhegel invokes once per output line. Runs
+/// on whichever thread is inside `hegel_next_test_case` (ours), and must
+/// not call back into libhegel on the same run.
+let outputTrampoline: hegel_output_callback_t = { userData, line, len in
+    guard let userData, let line else { return }
+    let box = Unmanaged<OutputBox>.fromOpaque(userData).takeUnretainedValue()
+    box.handler(String(
+        decoding: UnsafeRawBufferPointer(start: line, count: len), as: UTF8.self))
+}
+
 /// A shrunk counterexample: one distinct bug found by a run.
 public struct Failure: Sendable {
     /// The origin string the failures were grouped under (here: the
@@ -43,6 +60,7 @@ public func forAll<A>(
     seed: UInt64? = nil,
     database: String? = nil,
     settings: Settings = Settings(),
+    output: ((String) -> Void)? = nil,
     origin explicitOrigin: String? = nil,
     file: StaticString = #fileID,
     line: UInt = #line,
@@ -55,6 +73,13 @@ public func forAll<A>(
     if let seed { settings.seed = seed }
     if let database { settings.database = database }
 
+    // Engine output (per Settings.verbosity) goes to `output` line by line
+    // instead of stderr. The box must outlive the run: lines are emitted
+    // inside hegel_next_test_case calls, so pin it until after run free
+    // (defers run in reverse order — this one is declared first).
+    let outputBox = output.map(OutputBox.init)
+    defer { withExtendedLifetime(outputBox) {} }
+
     let ctx = Context()
     // Failures with the same origin are the same bug; the call site is the
     // stable identity of this property. Wrappers (HegelTesting's expectAll)
@@ -65,7 +90,13 @@ public func forAll<A>(
     defer { _ = hegel_settings_free(ctx.raw, rawSettings) }
 
     var run: OpaquePointer?
-    try check(hegel_run_start(ctx.raw, rawSettings, nil, nil, &run), ctx.lastError)
+    try check(
+        hegel_run_start(
+            ctx.raw, rawSettings,
+            outputBox == nil ? nil : outputTrampoline,
+            outputBox.map { Unmanaged.passUnretained($0).toOpaque() },
+            &run),
+        ctx.lastError)
     defer { _ = hegel_run_free(ctx.raw, run) }
 
     while true {
@@ -141,5 +172,3 @@ public func forAll<A>(
     }
 }
 
-// TODO: route libhegel's output callback into a Swift closure instead of
-//       leaving it on stderr.
