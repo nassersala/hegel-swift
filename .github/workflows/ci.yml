@@ -24,6 +24,8 @@ jobs:
         run: swift test
       - name: Test example (AdhanProperties)
         run: swift test --package-path Examples/AdhanProperties
+      - name: Test example (AffordanceProperties)
+        run: swift test --package-path Examples/AffordanceProperties
       - name: Build for iOS simulator
         run: >
           xcodebuild build -scheme HegelTesting
