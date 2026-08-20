@@ -106,10 +106,30 @@ public func forAll<A>(
         defer { _ = hegel_test_case_free(ctx.raw, rawCase) }
 
         let tc = TestCase(ctx: ctx, raw: rawCase)
+
+        // Generation first, handled separately from the property: an error
+        // out of a draw is not a verdict on the property. Control flow maps
+        // to OVERRUN/INVALID; anything else (an FFI failure, a broken
+        // generator) aborts the run rather than masquerading as a
+        // counterexample. hegel_run_free completes the in-flight case.
+        let value: A
+        do {
+            value = try gen.run(tc)
+        } catch HegelError.stopTest {
+            try check(
+                hegel_mark_complete(ctx.raw, rawCase, TestCaseStatus.overrun.rawValue, nil),
+                ctx.lastError)
+            continue
+        } catch HegelError.assume {
+            try check(
+                hegel_mark_complete(ctx.raw, rawCase, TestCaseStatus.invalid.rawValue, nil),
+                ctx.lastError)
+            continue
+        }
+
         let status: TestCaseStatus
         var bugOrigin: String?
         do {
-            let value = try gen.run(tc)
             try property(value)
             status = .valid
         } catch HegelError.stopTest {

@@ -1,3 +1,5 @@
+import Foundation  // String(format:) — leaks through Hegel today, but only because
+// non-resilient swiftmodules expose their imports; be explicit.
 import Hegel
 
 // The transcript program. Its exact draw sequence, knob for knob, is

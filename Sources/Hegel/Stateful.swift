@@ -115,12 +115,20 @@ public func forAll<State>(
                 // Span the rule's draws so the shrinker deletes whole steps.
                 try tc.call(hegel_start_span(
                     tc.ctx.raw, tc.raw, UInt64(HEGEL_LABEL_STATEFUL_RULE.rawValue)))
+                // Snapshot so a rule that mutates and then rejects leaves no
+                // trace — the engine is told the step never happened, so the
+                // state must agree. (A copy only isolates value semantics:
+                // state reached through references in State is the rule
+                // author's responsibility, as in Hypothesis.)
+                let snapshot = state
                 do {
                     try rule.step(&state, tc)
                     _ = hegel_stop_span(tc.ctx.raw, tc.raw, false)
                 } catch HegelError.assume {
-                    // The rule rejected its drawn arguments: discard the
-                    // span and tell the engine the step didn't count.
+                    // The rule rejected its drawn arguments: roll back the
+                    // state, discard the span, and tell the engine the step
+                    // didn't count.
+                    state = snapshot
                     _ = hegel_stop_span(tc.ctx.raw, tc.raw, true)
                     try tc.call(hegel_state_machine_rule_rejected(tc.ctx.raw, tc.raw, sm))
                     continue

@@ -4,3 +4,5 @@ DerivedData/
 *.xcodeproj
 .DS_Store
 .hegel/
+# go build artifact of the conformance harness
+Conformance/transcript-go/transcript-go

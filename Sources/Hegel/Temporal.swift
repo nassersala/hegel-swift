@@ -31,8 +31,15 @@ public struct CalendarDate: Hashable, Comparable, Sendable, CustomStringConverti
         DateComponents(year: year, month: month, day: day)
     }
 
-    var raw: hegel_date_t {
-        hegel_date_t(year: Int32(year), month: UInt8(month), day: UInt8(day))
+    func raw() throws(HegelError) -> hegel_date_t {
+        // Validate before the fixed-width conversions: out-of-domain bounds
+        // must surface as invalidArgument, not trap. Day precision beyond
+        // 1...31 (days in month) is the engine's own validation.
+        guard (-999_999...999_999).contains(year), (1...12).contains(month),
+              (1...31).contains(day) else {
+            throw .invalidArgument("invalid date bound: \(self)")
+        }
+        return hegel_date_t(year: Int32(year), month: UInt8(month), day: UInt8(day))
     }
 
     init(raw: hegel_date_t) {
@@ -70,8 +77,12 @@ public struct TimeOfDay: Hashable, Comparable, Sendable, CustomStringConvertible
         DateComponents(hour: hour, minute: minute, second: second, nanosecond: microsecond * 1000)
     }
 
-    var raw: hegel_time_t {
-        hegel_time_t(
+    func raw() throws(HegelError) -> hegel_time_t {
+        guard (0...23).contains(hour), (0...59).contains(minute),
+              (0...59).contains(second), (0...999_999).contains(microsecond) else {
+            throw .invalidArgument("invalid time bound: \(self)")
+        }
+        return hegel_time_t(
             hour: UInt8(hour), minute: UInt8(minute), second: UInt8(second),
             microsecond: UInt32(microsecond))
     }
@@ -107,8 +118,8 @@ public struct CalendarDateTime: Hashable, Comparable, Sendable, CustomStringConv
             nanosecond: time.microsecond * 1000)
     }
 
-    var raw: hegel_datetime_t {
-        hegel_datetime_t(date: date.raw, time: time.raw)
+    func raw() throws(HegelError) -> hegel_datetime_t {
+        hegel_datetime_t(date: try date.raw(), time: try time.raw())
     }
 
     init(raw: hegel_datetime_t) {
@@ -125,7 +136,7 @@ extension TestCase {
         in range: ClosedRange<CalendarDate> = .distantPast ... .distantFuture
     ) throws(HegelError) -> CalendarDate {
         var out = hegel_date_t()
-        try call(hegel_generate_date(ctx.raw, raw, range.lowerBound.raw, range.upperBound.raw, &out))
+        try call(hegel_generate_date(ctx.raw, raw, try range.lowerBound.raw(), try range.upperBound.raw(), &out))
         return CalendarDate(raw: out)
     }
 
@@ -134,7 +145,7 @@ extension TestCase {
         in range: ClosedRange<TimeOfDay> = .midnight ... .endOfDay
     ) throws(HegelError) -> TimeOfDay {
         var out = hegel_time_t()
-        try call(hegel_generate_time(ctx.raw, raw, range.lowerBound.raw, range.upperBound.raw, &out))
+        try call(hegel_generate_time(ctx.raw, raw, try range.lowerBound.raw(), try range.upperBound.raw(), &out))
         return TimeOfDay(raw: out)
     }
 
@@ -144,7 +155,7 @@ extension TestCase {
         in range: ClosedRange<CalendarDateTime>
     ) throws(HegelError) -> CalendarDateTime {
         var out = hegel_datetime_t()
-        try call(hegel_generate_datetime(ctx.raw, raw, range.lowerBound.raw, range.upperBound.raw, &out))
+        try call(hegel_generate_datetime(ctx.raw, raw, try range.lowerBound.raw(), try range.upperBound.raw(), &out))
         return CalendarDateTime(raw: out)
     }
 }
