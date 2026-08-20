@@ -70,7 +70,7 @@ The cost is honest: you pass generators explicitly instead of having the compile
 
 ## Getting libhegel
 
-`Vendor/CHegel.xcframework` vendors libhegel v0.32.5 as a binary target: one dynamic `CHegel.framework` per slice, each carrying the dylib, the canonical `hegel.h`, and a module map. `swift build` and `swift test` work out of the box — no linker flags, no rpaths, no install-name surgery; SPM/Xcode link and embed the framework wherever the package is consumed.
+`Vendor/CHegel.xcframework` vendors libhegel v0.32.5 as a binary target: one dynamic `CHegel.framework` per slice — macOS arm64, iOS device (arm64), and iOS simulator (arm64) — each carrying the dylib, the canonical `hegel.h`, and a module map. `swift build` and `swift test` work out of the box — no linker flags, no rpaths, no install-name surgery; SPM/Xcode link and embed the framework wherever the package is consumed. The full suite passes on the iOS simulator (`xcodebuild test -scheme hegel-swift-Package -destination 'platform=iOS Simulator,name=iPhone 17 Pro'`).
 
 The slices are built from the pinned tag of [hegeldev/hegel-rust](https://github.com/hegeldev/hegel-rust) (upstream releases ship prebuilt dylibs for desktop platforms only, so iOS requires building from source anyway). To upgrade, bump `TAG` in `Scripts/build-xcframework.sh` and rebuild against a checkout of that tag:
 

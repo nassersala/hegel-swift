@@ -1,0 +1,4 @@
+framework module CHegel {
+    umbrella header "hegel.h"
+    export *
+}
