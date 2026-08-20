@@ -57,10 +57,15 @@ extension Gen where Value == String {
 }
 
 private func formatIP(_ bytes: [UInt8], family: Int32) -> String {
-    var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+    var buffer = [UInt8](repeating: 0, count: Int(INET6_ADDRSTRLEN))
     let formatted = bytes.withUnsafeBufferPointer { raw in
-        inet_ntop(family, raw.baseAddress, &buffer, socklen_t(buffer.count)) != nil
+        buffer.withUnsafeMutableBytes { out in
+            inet_ntop(
+                family, raw.baseAddress,
+                out.baseAddress?.assumingMemoryBound(to: CChar.self),
+                socklen_t(out.count)) != nil
+        }
     }
     precondition(formatted, "inet_ntop failed for a \(bytes.count)-byte address")
-    return String(cString: buffer)
+    return String(decoding: buffer.prefix(while: { $0 != 0 }), as: UTF8.self)
 }

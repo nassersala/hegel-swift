@@ -59,10 +59,18 @@ public struct StatefulRun<State>: CustomStringConvertible {
 /// those whose preconditions hold), how many steps each case takes (up to
 /// `Settings.statefulStepCount`, default 50), and shrinks failing runs to
 /// a minimal rule sequence.
+///
+/// `maximize` turns the run into a targeted search: the state is scored
+/// (finite, higher = closer to interesting) after the initial state and
+/// after every step, and the run's maximum is reported to the engine,
+/// which hill-climbs — biasing later runs toward rule sequences that got
+/// closer. Use it when the violation is a rare state a random walk seldom
+/// reaches.
 public func forAll<State>(
     initial: Gen<State>,
     rules: [Rule<State>],
     invariants: [Invariant<State>] = [],
+    maximize: (@Sendable (State) -> Double)? = nil,
     testCases: UInt64? = nil,
     seed: UInt64? = nil,
     database: String? = nil,
@@ -98,6 +106,11 @@ public func forAll<State>(
                     throw error
                 }
             }
+        }
+
+        var bestScore = maximize?(state)
+        func observe() {
+            if let maximize { bestScore = Swift.max(bestScore!, maximize(state)) }
         }
 
         do {
@@ -139,6 +152,10 @@ public func forAll<State>(
                 }
                 steps.append(rule.name)
                 try checkInvariants()
+                observe()
+            }
+            if let bestScore {
+                try tc.call(hegel_target(tc.ctx.raw, tc.raw, bestScore, "stateful.maximize"))
             }
         } catch HegelError.stopTest {
             throw HegelError.stopTest

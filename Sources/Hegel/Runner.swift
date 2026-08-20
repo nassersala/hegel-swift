@@ -66,6 +66,28 @@ public func forAll<A>(
     line: UInt = #line,
     _ property: (A) throws -> Void
 ) throws {
+    try forAll(
+        gen, testCases: testCases, seed: seed, database: database,
+        settings: settings, output: output, origin: explicitOrigin,
+        file: file, line: line
+    ) { value, _ in try property(value) }
+}
+
+/// `forAll` whose property also receives the live `TestCase`, for bodies
+/// that record targeting observations (`tc.target(score)`) or make
+/// additional draws.
+public func forAll<A>(
+    _ gen: Gen<A>,
+    testCases: UInt64? = nil,
+    seed: UInt64? = nil,
+    database: String? = nil,
+    settings: Settings = Settings(),
+    output: ((String) -> Void)? = nil,
+    origin explicitOrigin: String? = nil,
+    file: StaticString = #fileID,
+    line: UInt = #line,
+    _ property: (A, TestCase) throws -> Void
+) throws {
     // The convenience parameters override the corresponding Settings
     // fields, so the common knobs stay one label away.
     var settings = settings
@@ -130,7 +152,7 @@ public func forAll<A>(
         let status: TestCaseStatus
         var bugOrigin: String?
         do {
-            try property(value)
+            try property(value, tc)
             status = .valid
         } catch HegelError.stopTest {
             status = .overrun

@@ -116,6 +116,22 @@ invariant big is never 4 failed
 
 Six steps — the minimal solution, found by random rule scheduling and minimized by choice-sequence shrinking (`DieHardTests.swift` pins it exactly; across seeds 1–10, nine shrink to this trace and one lands in the valid 8-step alternative, a reminder that shrinking guarantees a *local* minimum).
 
+## Targeted properties
+
+`tc.target(score)` records a finite observation (higher = more interesting) and the engine hill-climbs, biasing later cases toward inputs that scored higher. The property closure can take the `TestCase` as a second parameter to record it:
+
+```swift
+try forAll(array(of: .int(in: 0...10), count: 0...200)) { xs, tc in
+    let sum = xs.reduce(0, +)
+    try tc.target(Double(sum))
+    #expect(sum < 800)   // unreachable by random search, routine with targeting
+}
+```
+
+Generation biases toward short lists, so random search finds `sum >= 800` in 0 of 20 runs at 200 cases; with targeting, 18 of 20 — and the shrinker then minimizes the hit to a list summing to exactly 800. Stateful runs take a `maximize:` closure (scored after every step, the run's best reported once).
+
+Measured caveat: targeting is only as good as the gradient. On Die Hard, `maximize: -|big − 4|` made discovery *worse* than random search — `big = 3` and `big = 5` both score −1 but are structurally far from the solution, so the engine climbs a deceptive plateau. Score real progress, not proximity that lies.
+
 ## Example: properties for a real library
 
 `Examples/AdhanProperties` property-tests [adhan-swift](https://github.com/batoulapps/adhan-swift) (Islamic prayer times): ordering of the five prayers, madhab moving only asr, qibla always a bearing, times belonging to their day. **The first run found a real bug** ([batoulapps/adhan-swift#102](https://github.com/batoulapps/adhan-swift/issues/102)): in the high-latitude band the library can return non-nil, out-of-order times — asr before dhuhr on the same day, or landing days after the requested date. Hegel shrank it to the minimal reproduction `(lat -72, lon 0), 2000-08-01, muslimWorldLeague`. ~1,700 generated cases run in ~13 ms.
@@ -168,7 +184,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [x] Dates/times/datetimes (`CalendarDate`/`TimeOfDay`/`CalendarDateTime` + `DateComponents` bridging), UUIDs, IPv4/IPv6, big integers (`UInt64`, `Int128`, `UInt128`)
 - [x] `Settings` on `forAll`/`expectAll`: seed, derandomize, database path/key, phases, multiple-failure reporting (distinct thrown error types = distinct bugs), verbosity, single-test-case mode
 - [x] Stateful testing: `forAll(initial:rules:invariants:)` over engine state machines (rule selection, step budget, whole-step shrinking) + `Pool` for reuse of previously generated values; failing runs display as minimal rule traces
-- [ ] Targeted PBT (`hegel_target`)
+- [x] Targeted PBT: `tc.target(score)` in property bodies (`forAll` passes the `TestCase` to two-parameter closures) + `maximize:` on stateful runs
 - [x] Swift Testing integration sugar: `expectAll` + `.propertyTesting` trait (motivated by the adhan dogfood: bare `#expect` inside a `forAll` property doesn't shrink)
 - [x] Binary target: `CHegel.xcframework` vendored, built from the pinned hegel-rust tag (`Scripts/build-xcframework.sh`) — no linker flags or rpaths anywhere
 - [x] Differential conformance vs hegel-go: identical seed → identical draw transcript, same engine binary (`Scripts/conformance.sh`)
