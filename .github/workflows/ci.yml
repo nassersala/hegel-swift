@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    # arm64 runner: the vendored CHegel.xcframework carries macos-arm64,
+    # ios-arm64, and ios-arm64-simulator slices.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          # HegelTesting uses Swift Testing's IssueHandlingTrait (Swift 6.2+).
+          xcode-version: latest-stable
+      - name: Versions
+        run: swift --version && xcodebuild -version
+      - name: Test Hegel
+        # libhegel detects CI (GITHUB_ACTIONS): the example database is
+        # auto-disabled and runs derandomize by default.
+        run: swift test
+      - name: Test example (AdhanProperties)
+        run: swift test --package-path Examples/AdhanProperties
+      - name: Build for iOS simulator
+        run: >
+          xcodebuild build -scheme HegelTesting
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath .build/dd-ios-sim
+
+  conformance:
+    # Differential conformance vs hegel-go: same seed, same engine binary,
+    # transcripts must match byte for byte.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Compare draw transcripts with hegel-go
+        run: Scripts/conformance.sh
