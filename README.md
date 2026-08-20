@@ -112,7 +112,7 @@ Same strategy as the official bindings (hegel-go is the template), self-bootstra
 
 1. **Hermetic FFI smoke tests** (`SmokeTests.swift`) — drive the raw C protocol with a pinned seed, derandomization, and the database disabled; assert the loop actually yields test cases. Tests *our marshalling*; the engine is trusted upstream.
 2. **Self-bootstrap** (`HegelTests.swift`) — `forAll` testing the binding's own generators (bounds, filter semantics, collection sizes). Two test kinds cannot pass vacuously: *deliberate-failure* tests (a false property must fail, and must shrink to its **known** minimal counterexample) and *blob* assertions (a failure must carry a reproduce blob).
-3. **Differential conformance** (planned) — same seed + derandomize must produce identical draw transcripts here and in hegel-go/hegel-rust; the choice-sequence model makes cross-language determinism directly checkable.
+3. **Differential conformance** (`Conformance/` + `Scripts/conformance.sh`) — the same draw program under the same seed produces byte-identical draw transcripts here and in hegel-go, both loading the *same* vendored libhegel binary (hegel-go accepts it via `HEGEL_LIBHEGEL_PATH`; it pins 0.32.5 too). The choice-sequence model makes cross-language determinism directly checkable, and it holds.
 
 The Antithesis platform is deliberately *not* part of this layer, even though Hegel is an Antithesis project: their integration points the other way (libhegel's `urandom` backend lets the Antithesis fuzzer steer Hegel tests running inside their deterministic hypervisor). Where it may earn a place later: fuzzing the threading contracts (`hegel_test_case_clone` from multiple threads) under a deterministic scheduler.
 
@@ -136,6 +136,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [ ] Targeted PBT (`hegel_target`)
 - [x] Swift Testing integration sugar: `expectAll` + `.propertyTesting` trait (motivated by the adhan dogfood: bare `#expect` inside a `forAll` property doesn't shrink)
 - [x] Binary target: `CHegel.xcframework` vendored, built from the pinned hegel-rust tag (`Scripts/build-xcframework.sh`) — no linker flags or rpaths anywhere
+- [x] Differential conformance vs hegel-go: identical seed → identical draw transcript, same engine binary (`Scripts/conformance.sh`)
 - [ ] Validate against `hegeldev/hegel-core` (the cross-language protocol suite)
 
 ## References
