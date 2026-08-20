@@ -8,6 +8,9 @@ public struct Failure: Sendable {
     /// Base64 choice sequence replaying the minimal counterexample.
     /// Version-pinned: only replays on the libhegel version that made it.
     public let reproduceBlob: String?
+    /// The minimal counterexample itself, recovered by replaying the blob
+    /// through the generator. `String(describing:)` of the value.
+    public let counterexample: String?
 }
 
 /// Thrown by `forAll` when the property fails (with counterexamples) or the
@@ -18,9 +21,12 @@ public struct PropertyFailure: Error, CustomStringConvertible {
 
     public var description: String {
         if let runError { return "hegel run errored: \(runError)" }
-        let blobs = failures.compactMap(\.reproduceBlob)
-        return "property failed with \(failures.count) distinct bug(s)"
-            + (blobs.isEmpty ? "" : "; reproduce blobs: \(blobs.joined(separator: ", "))")
+        let lines = failures.map { f in
+            "  counterexample: \(f.counterexample ?? "<unavailable>")"
+                + (f.reproduceBlob.map { "\n  reproduce blob: \($0)" } ?? "")
+        }
+        return "property failed with \(failures.count) distinct bug(s)\n"
+            + lines.joined(separator: "\n")
     }
 }
 
@@ -116,9 +122,17 @@ public func forAll<A>(
             var blobPtr: UnsafePointer<CChar>?
             _ = hegel_failure_origin(ctx.raw, rawFailure, &originPtr)
             _ = hegel_failure_reproduction_blob(ctx.raw, rawFailure, &blobPtr)
+            let blob = blobPtr.map { String(cString: $0) }
+            // Recover the shrunk value for display by replaying the blob
+            // through the same generator. Best-effort: a replay failure
+            // leaves the blob as the fallback.
+            let counterexample = blob.flatMap { b in
+                (try? replay(gen, blob: b)).map { String(describing: $0) }
+            }
             failures.append(Failure(
                 origin: originPtr.map { String(cString: $0) } ?? origin,
-                reproduceBlob: blobPtr.map { String(cString: $0) }))
+                reproduceBlob: blob,
+                counterexample: counterexample))
         }
         throw PropertyFailure(failures: failures, runError: nil)
     }
