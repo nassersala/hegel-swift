@@ -23,6 +23,32 @@ When that property fails, you don't get a random 47-field counterexample — you
 
 > **Status: pre-alpha, but alive.** The core loop — run lifecycle, integer/bool/double/bytes draws, collections, spans, filtering, shrinking, failure reporting with reproduce blobs — compiles and passes its suite against the real engine (libhegel v0.32.5, vendored as a binary target). The shrinker test asserts that `n >= 10` shrinks to exactly `10`. See [Roadmap](#roadmap) for what's missing.
 
+## Installation
+
+Add the package to `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/nassersala/hegel-swift", from: "0.1.0"),
+]
+```
+
+and the products to your test target:
+
+```swift
+.testTarget(
+    name: "MyTests",
+    dependencies: [
+        .product(name: "Hegel", package: "hegel-swift"),
+        .product(name: "HegelTesting", package: "hegel-swift"), // Swift Testing sugar
+    ]
+)
+```
+
+libhegel ships inside the package as a binary target, so there is nothing else to install, link, or configure.
+
+Requirements: Swift 6.2+ (Xcode 26), macOS 14+ / iOS 17+, Apple Silicon (the vendored slices are macOS arm64, iOS device, and iOS simulator).
+
 ## Why
 
 ### Why property-based testing
@@ -70,7 +96,7 @@ The cost is honest: you pass generators explicitly instead of having the compile
 
 ## Getting libhegel
 
-`Vendor/CHegel.xcframework` vendors libhegel v0.32.5 as a binary target: one dynamic `CHegel.framework` per slice — macOS arm64, iOS device (arm64), and iOS simulator (arm64) — each carrying the dylib, the canonical `hegel.h`, and a module map. `swift build` and `swift test` work out of the box — no linker flags, no rpaths, no install-name surgery; SPM/Xcode link and embed the framework wherever the package is consumed. The full suite passes on the iOS simulator (`xcodebuild test -scheme hegel-swift-Package -destination 'platform=iOS Simulator,name=iPhone 17 Pro'`).
+`Vendor/CHegel.xcframework` vendors libhegel v0.32.5 as a binary target: one dynamic `CHegel.framework` per slice (macOS arm64, iOS device, iOS simulator), each carrying the dylib, the canonical `hegel.h`, and a module map. `swift build` and `swift test` work out of the box; SPM and Xcode link and embed the framework wherever the package is consumed. The full suite passes on the iOS simulator (`xcodebuild test -scheme hegel-swift-Package -destination 'platform=iOS Simulator,name=iPhone 17 Pro'`).
 
 The slices are built from the pinned tag of [hegeldev/hegel-rust](https://github.com/hegeldev/hegel-rust) (upstream releases ship prebuilt dylibs for desktop platforms only, so iOS requires building from source anyway). To upgrade, bump `TAG` in `Scripts/build-xcframework.sh` and rebuild against a checkout of that tag:
 
@@ -83,7 +109,7 @@ The script refuses to build from a checkout that isn't exactly at the pinned tag
 
 ## Die Hard, solved by the shrinker
 
-The classic TLA+ showcase (via [Hypothesis](https://hypothesis.works/articles/how-not-to-die-hard-with-hypothesis/)): a 3-gallon jug, a 5-gallon jug, and the *false* invariant that the big jug never holds exactly 4 gallons. Model the jugs as a state machine and the engine does the rest — the shrunk counterexample **is** the puzzle's solution:
+The classic TLA+ example (via [Hypothesis](https://hypothesis.works/articles/how-not-to-die-hard-with-hypothesis/)): a 3-gallon jug, a 5-gallon jug, and the false invariant that the big jug never holds exactly 4 gallons. The shrunk counterexample is the puzzle's solution:
 
 ```swift
 try forAll(
@@ -114,7 +140,7 @@ initial: (small: 0, big: 0)
 invariant big is never 4 failed
 ```
 
-Six steps — the minimal solution, found by random rule scheduling and minimized by choice-sequence shrinking (`DieHardTests.swift` pins it exactly; across seeds 1–10, nine shrink to this trace and one lands in the valid 8-step alternative, a reminder that shrinking guarantees a *local* minimum).
+Six steps, the minimal solution. Random rule scheduling finds a solution; choice-sequence shrinking minimizes it. `DieHardTests.swift` pins the trace exactly. Across seeds 1–10, nine shrink to this trace and one lands in the valid 8-step alternative; shrinking guarantees a local minimum, not a global one.
 
 ## Targeted properties
 
@@ -124,13 +150,13 @@ Six steps — the minimal solution, found by random rule scheduling and minimize
 try forAll(array(of: .int(in: 0...10), count: 0...200)) { xs, tc in
     let sum = xs.reduce(0, +)
     try tc.target(Double(sum))
-    #expect(sum < 800)   // unreachable by random search, routine with targeting
+    #expect(sum < 800)
 }
 ```
 
-Generation biases toward short lists, so random search finds `sum >= 800` in 0 of 20 runs at 200 cases; with targeting, 18 of 20 — and the shrinker then minimizes the hit to a list summing to exactly 800. Stateful runs take a `maximize:` closure (scored after every step, the run's best reported once).
+Generation biases toward short lists, so at 200 cases random search finds `sum >= 800` in 0 of 20 runs; with targeting, 18 of 20. The shrinker then minimizes the hit to a list summing to exactly 800. Stateful runs take a `maximize:` closure, scored after every step, with the run's best reported once.
 
-Measured caveat: targeting is only as good as the gradient. On Die Hard, `maximize: -|big − 4|` made discovery *worse* than random search — `big = 3` and `big = 5` both score −1 but are structurally far from the solution, so the engine climbs a deceptive plateau. Score real progress, not proximity that lies.
+Measured caveat: targeting is only as good as the gradient. On Die Hard, `maximize: -|big − 4|` made discovery worse than random search, because `big = 3` and `big = 5` both score −1 while being structurally far from the solution. The score must measure real progress toward the bug.
 
 ## Example: properties for a real library
 
@@ -163,7 +189,7 @@ Same strategy as the official bindings (hegel-go is the template), self-bootstra
 
 1. **Hermetic FFI smoke tests** (`SmokeTests.swift`) — drive the raw C protocol with a pinned seed, derandomization, and the database disabled; assert the loop actually yields test cases. Tests *our marshalling*; the engine is trusted upstream.
 2. **Self-bootstrap** (`HegelTests.swift`) — `forAll` testing the binding's own generators (bounds, filter semantics, collection sizes). Two test kinds cannot pass vacuously: *deliberate-failure* tests (a false property must fail, and must shrink to its **known** minimal counterexample) and *blob* assertions (a failure must carry a reproduce blob).
-3. **Differential conformance** (`Conformance/` + `Scripts/conformance.sh`) — the same draw program under the same seed produces byte-identical draw transcripts here and in hegel-go, both loading the *same* vendored libhegel binary (hegel-go accepts it via `HEGEL_LIBHEGEL_PATH`; it pins 0.32.5 too). The choice-sequence model makes cross-language determinism directly checkable, and it holds.
+3. **Differential conformance** (`Conformance/` + `Scripts/conformance.sh`) — the same draw program under the same seed produces byte-identical draw transcripts here and in hegel-go, both loading the *same* vendored libhegel binary (hegel-go accepts it via `HEGEL_LIBHEGEL_PATH`; it pins 0.32.5 too). The choice-sequence model makes cross-language determinism directly checkable; the transcripts match.
 
 The Antithesis platform is deliberately *not* part of this layer, even though Hegel is an Antithesis project: their integration points the other way (libhegel's `urandom` backend lets the Antithesis fuzzer steer Hegel tests running inside their deterministic hypervisor). Where it may earn a place later: fuzzing the threading contracts (`hegel_test_case_clone` from multiple threads) under a deterministic scheduler.
 
@@ -178,7 +204,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 
 ## Roadmap
 
-- [x] Compile against real `libhegel` (v0.32.5 prebuilt, SHA-verified); suite green incl. shrink-to-known-minimum
+- [x] Compile against real `libhegel` (v0.32.5, built from the pinned hegel-rust tag); suite green incl. shrink-to-known-minimum
 - [x] String generators (text/regex/email/URL/domain, Unicode categories & codepoint ranges incl. Arabic) with RAII generator handles
 - [x] `replay(blob:)` + drawn-value display: `PropertyFailure` shows the shrunk counterexample, recovered by replaying the blob through the generator
 - [x] Dates/times/datetimes (`CalendarDate`/`TimeOfDay`/`CalendarDateTime` + `DateComponents` bridging), UUIDs, IPv4/IPv6, big integers (`UInt64`, `Int128`, `UInt128`)
@@ -196,3 +222,9 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [hegeldev/hegel-rust](https://github.com/hegeldev/hegel-rust) — reference implementation + canonical `hegel.h`
 - Brandon Williams, *Protocol Witnesses* — the design stance behind `Gen`
 - [Hypothesis](https://hypothesis.readthedocs.io) — the model this all descends from
+
+## Crafted By:
+Nasser Ali Alzahrani [@nassersala](http://twitter.com/nassersala)
+
+## License
+MIT — see [LICENSE](LICENSE). `Vendor/CHegel.xcframework` contains libhegel binaries built unmodified from [hegeldev/hegel-rust](https://github.com/hegeldev/hegel-rust) v0.32.5 (MIT, Antithesis, LLC); the upstream notice is included in LICENSE. This binding is unofficial and not affiliated with Antithesis.
