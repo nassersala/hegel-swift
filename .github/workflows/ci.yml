@@ -26,6 +26,14 @@ jobs:
         run: swift test --package-path Examples/AdhanProperties
       - name: Test example (AffordanceProperties)
         run: swift test --package-path Examples/AffordanceProperties
+      - name: Test AffordanceProperties on iOS simulator
+        working-directory: Examples/AffordanceProperties
+        run: |
+          DEVICE=$(xcrun simctl list devices available | grep -m1 -o 'iPhone [^(]*' | xargs)
+          echo "using simulator: $DEVICE"
+          xcodebuild test -scheme AffordanceProperties-Package \
+            -destination "platform=iOS Simulator,name=$DEVICE" \
+            -derivedDataPath .build/dd-sim
       - name: Build for iOS simulator
         run: >
           xcodebuild build -scheme HegelTesting

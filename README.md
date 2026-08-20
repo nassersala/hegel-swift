@@ -204,6 +204,13 @@ invariant affordance correctness failed
 violated: trigger looks disabled but is legal (state: armed)
 ```
 
+The example runs the property twice: against a plain struct panel, and against an `@Observable` view model — the object a SwiftUI view actually binds with `.disabled(!model.visual.triggerEnabled)`, with a real `View` in the file to prove the binding surface. Rules call the view model's intents the way a user taps buttons. All of it passes on the iOS simulator:
+
+```sh
+cd Examples/AffordanceProperties
+xcodebuild test -scheme AffordanceProperties-Package -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+```
+
 When this property fails in a real product, the user is in Norman's "gulf of execution": the interface misrepresents what the system will do. The Therac-25 accidents were this property violated with a beam button. The model here follows earlier work connecting cleanroom sequence specification (Prowell), affordance theory (Norman), and property-based testing; the state machine and the planted bug are ported from a Python/Hypothesis study of the same idea.
 
 ## Testing the binding itself
