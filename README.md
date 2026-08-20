@@ -85,6 +85,8 @@ The script refuses to build from a checkout that isn't exactly at the pinned tag
 
 `Examples/AdhanProperties` property-tests [adhan-swift](https://github.com/batoulapps/adhan-swift) (Islamic prayer times): ordering of the five prayers, madhab moving only asr, qibla always a bearing, times belonging to their day. **The first run found a real bug** ([batoulapps/adhan-swift#102](https://github.com/batoulapps/adhan-swift/issues/102)): in the high-latitude band the library can return non-nil, out-of-order times — asr before dhuhr on the same day, or landing days after the requested date. Hegel shrank it to the minimal reproduction `(lat -72, lon 0), 2000-08-01, muslimWorldLeague`. ~1,700 generated cases run in ~13 ms.
 
+The example also includes a stateful machine: rules move a probe clock around a generated day while an invariant pins the `currentPrayer`/`nextPrayer` contract (before fajr it's `(nil, fajr)`, from isha on `(isha, nil)`, otherwise `next` is `current`'s successor and the clock sits in `[time(current), time(next))`).
+
 Dogfood lesson, worth knowing: **properties passed to `forAll` must `throw` on violation.** A bare `#expect` inside `forAll` records a Swift Testing issue but returns normally, so the engine counts the case as valid and never shrinks it. `expectAll` (below) exists because of this.
 
 ## Swift Testing integration
@@ -130,7 +132,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [x] `replay(blob:)` + drawn-value display: `PropertyFailure` shows the shrunk counterexample, recovered by replaying the blob through the generator
 - [x] Dates/times/datetimes (`CalendarDate`/`TimeOfDay`/`CalendarDateTime` + `DateComponents` bridging), UUIDs, IPv4/IPv6, big integers (`UInt64`, `Int128`, `UInt128`)
 - [x] `Settings` on `forAll`/`expectAll`: seed, derandomize, database path/key, phases, multiple-failure reporting (distinct thrown error types = distinct bugs), verbosity, single-test-case mode
-- [ ] Stateful testing (pools + state machines)
+- [x] Stateful testing: `forAll(initial:rules:invariants:)` over engine state machines (rule selection, step budget, whole-step shrinking) + `Pool` for reuse of previously generated values; failing runs display as minimal rule traces
 - [ ] Targeted PBT (`hegel_target`)
 - [x] Swift Testing integration sugar: `expectAll` + `.propertyTesting` trait (motivated by the adhan dogfood: bare `#expect` inside a `forAll` property doesn't shrink)
 - [x] Binary target: `CHegel.xcframework` vendored, built from the pinned hegel-rust tag (`Scripts/build-xcframework.sh`) — no linker flags or rpaths anywhere

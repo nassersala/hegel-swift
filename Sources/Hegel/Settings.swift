@@ -32,6 +32,9 @@ public struct Settings: Sendable {
     /// Full test run, or a single generated case with no shrinking
     /// (replay/exploration tooling). nil = engine default (.testRun).
     public var mode: Mode?
+    /// Target steps per stateful test case (at least 1; each case runs
+    /// 1...n steps). nil = engine default (50).
+    public var statefulStepCount: Int64?
 
     public init(
         testCases: UInt64 = 100,
@@ -42,7 +45,8 @@ public struct Settings: Sendable {
         phases: Phases? = nil,
         reportMultipleFailures: Bool? = nil,
         verbosity: Verbosity? = nil,
-        mode: Mode? = nil
+        mode: Mode? = nil,
+        statefulStepCount: Int64? = nil
     ) {
         self.testCases = testCases
         self.seed = seed
@@ -53,6 +57,7 @@ public struct Settings: Sendable {
         self.reportMultipleFailures = reportMultipleFailures
         self.verbosity = verbosity
         self.mode = mode
+        self.statefulStepCount = statefulStepCount
     }
 
     /// Phases of the property-test loop (`hegel_phase_t` bit flags).
@@ -122,6 +127,11 @@ public struct Settings: Sendable {
             }
             if let mode {
                 try check(hegel_settings_set_mode(ctx.raw, handle, mode.rawValue), ctx.lastError)
+            }
+            if let statefulStepCount {
+                try check(
+                    hegel_settings_set_stateful_step_count(ctx.raw, handle, statefulStepCount),
+                    ctx.lastError)
             }
         } catch {
             _ = hegel_settings_free(ctx.raw, handle)
