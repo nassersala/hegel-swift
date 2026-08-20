@@ -81,6 +81,41 @@ HEGEL_RUST=/tmp/hegel-rust-vX.Y.Z Scripts/build-xcframework.sh --slices macos,io
 
 The script refuses to build from a checkout that isn't exactly at the pinned tag. The canonical ABI is `hegel-c/include/hegel.h` in hegel-rust; this binding tracks it. Reproduce blobs are version-pinned — a stored counterexample replays only on the libhegel version that produced it.
 
+## Die Hard, solved by the shrinker
+
+The classic TLA+ showcase (via [Hypothesis](https://hypothesis.works/articles/how-not-to-die-hard-with-hypothesis/)): a 3-gallon jug, a 5-gallon jug, and the *false* invariant that the big jug never holds exactly 4 gallons. Model the jugs as a state machine and the engine does the rest — the shrunk counterexample **is** the puzzle's solution:
+
+```swift
+try forAll(
+    initial: Gen { _ in Jugs() },
+    rules: [
+        Rule("fill small")  { jugs, _ in jugs.small = 3 },
+        Rule("fill big")    { jugs, _ in jugs.big = 5 },
+        Rule("empty small") { jugs, _ in jugs.small = 0 },
+        Rule("empty big")   { jugs, _ in jugs.big = 0 },
+        Rule("pour small into big") { jugs, _ in /* … */ },
+        Rule("pour big into small") { jugs, _ in /* … */ },
+    ],
+    invariants: [
+        Invariant("big is never 4") { jugs in
+            if jugs.big == 4 { throw DieHardSolved() }
+        }
+    ])
+```
+
+```
+initial: (small: 0, big: 0)
+  fill big
+  pour big into small
+  empty small
+  pour big into small
+  fill big
+  pour big into small
+invariant big is never 4 failed
+```
+
+Six steps — the minimal solution, found by random rule scheduling and minimized by choice-sequence shrinking (`DieHardTests.swift` pins it exactly; across seeds 1–10, nine shrink to this trace and one lands in the valid 8-step alternative, a reminder that shrinking guarantees a *local* minimum).
+
 ## Example: properties for a real library
 
 `Examples/AdhanProperties` property-tests [adhan-swift](https://github.com/batoulapps/adhan-swift) (Islamic prayer times): ordering of the five prayers, madhab moving only asr, qibla always a bearing, times belonging to their day. **The first run found a real bug** ([batoulapps/adhan-swift#102](https://github.com/batoulapps/adhan-swift/issues/102)): in the high-latitude band the library can return non-nil, out-of-order times — asr before dhuhr on the same day, or landing days after the requested date. Hegel shrank it to the minimal reproduction `(lat -72, lon 0), 2000-08-01, muslimWorldLeague`. ~1,700 generated cases run in ~13 ms.
