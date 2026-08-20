@@ -42,14 +42,16 @@ public func forAll<A>(
     testCases: UInt64 = 100,
     seed: UInt64? = nil,
     database: String? = nil,
+    origin explicitOrigin: String? = nil,
     file: StaticString = #fileID,
     line: UInt = #line,
     _ property: (A) throws -> Void
 ) throws {
     let ctx = Context()
     // Failures with the same origin are the same bug; the call site is the
-    // stable identity of this property.
-    let origin = "\(file):\(line)"
+    // stable identity of this property. Wrappers (HegelTesting's expectAll)
+    // pass their own caller's location through `origin`.
+    let origin = explicitOrigin ?? "\(file):\(line)"
 
     var settings: OpaquePointer?
     try check(hegel_settings_new(ctx.raw, &settings), ctx.lastError)

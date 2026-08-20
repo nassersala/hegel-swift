@@ -1,5 +1,6 @@
 import Testing
 import Hegel
+import HegelTesting
 import Adhan
 import Foundation
 
@@ -117,15 +118,15 @@ let temperateScenario = scenario(latitudes: -55...55)
     }
 
     /// Qibla direction is a finite bearing in [0, 360) everywhere outside
-    /// the poles.
-    @Test func qiblaIsAlwaysABearing() throws {
+    /// the poles. Written with expectAll: bare #expect failures shrink, and
+    /// the .propertyTesting trait keeps the search phase out of the results.
+    @Test(.propertyTesting) func qiblaIsAlwaysABearing() {
         let anywhere = zip(.double(in: -89...89), .double(in: -180...180))
             .map { Coordinates(latitude: $0, longitude: $1) }
-        try forAll(anywhere, testCases: 500, database: "") { c in
+        expectAll(anywhere, testCases: 500, database: "") { c in
             let direction = Qibla(coordinates: c).direction
-            guard direction.isFinite, direction >= 0, direction < 360 else {
-                throw HegelError.internalError("bad qibla bearing")
-            }
+            #expect(direction.isFinite)
+            #expect(direction >= 0 && direction < 360)
         }
     }
 

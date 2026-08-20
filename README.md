@@ -85,7 +85,24 @@ The canonical ABI is `hegel-c/include/hegel.h` in [hegeldev/hegel-rust](https://
 
 `Examples/AdhanProperties` property-tests [adhan-swift](https://github.com/batoulapps/adhan-swift) (Islamic prayer times): ordering of the five prayers, madhab moving only asr, qibla always a bearing, times belonging to their day. **The first run found a real bug** ([batoulapps/adhan-swift#102](https://github.com/batoulapps/adhan-swift/issues/102)): in the high-latitude band the library can return non-nil, out-of-order times — asr before dhuhr on the same day, or landing days after the requested date. Hegel shrank it to the minimal reproduction `(lat -72, lon 0), 2000-08-01, muslimWorldLeague`. ~1,700 generated cases run in ~13 ms.
 
-Dogfood lesson, worth knowing: **properties must `throw` on violation.** A bare `#expect` inside `forAll` records a Swift Testing issue but returns normally, so the engine counts the case as valid and never shrinks it. (Swift Testing integration sugar to close this gap is on the roadmap.)
+Dogfood lesson, worth knowing: **properties passed to `forAll` must `throw` on violation.** A bare `#expect` inside `forAll` records a Swift Testing issue but returns normally, so the engine counts the case as valid and never shrinks it. `expectAll` (below) exists because of this.
+
+## Swift Testing integration
+
+`HegelTesting` (a separate product, so `Hegel` itself never links the Testing framework) provides `expectAll`: same shape as `forAll`, but `#expect` failures inside the body are bridged into engine signals, so they shrink.
+
+```swift
+import Testing
+import HegelTesting  // re-exports Hegel
+
+@Test(.propertyTesting) func roundTrip() {
+    expectAll(adult) { user in
+        #expect(try decode(encode(user)) == user)
+    }
+}
+```
+
+On failure the test reports exactly two issues: the minimal counterexample (with its reproduce blob), and the body's own `#expect` failure replayed at that minimal input — pointing at the exact expectation that broke. The `.propertyTesting` trait keeps the search phase's intermediate failures out of the test results entirely; without it `expectAll` still works, but every failing probe shows up as a non-failing "known issue" line. Thrown errors keep their `forAll` meaning (`HegelError.assume` rejects the case; anything else is a violation).
 
 ## Testing the binding itself
 
@@ -115,7 +132,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [ ] Settings surface (seed, database path/key, phases, multiple-failure reporting)
 - [ ] Stateful testing (pools + state machines)
 - [ ] Targeted PBT (`hegel_target`)
-- [ ] Swift Testing / XCTest integration sugar (motivated by the adhan dogfood: bare `#expect` inside a property doesn't shrink)
+- [x] Swift Testing integration sugar: `expectAll` + `.propertyTesting` trait (motivated by the adhan dogfood: bare `#expect` inside a `forAll` property doesn't shrink)
 - [ ] Vendored binary artifact of `libhegel` so `swift test` works out of the box
 - [ ] Validate against `hegeldev/hegel-core` (the cross-language protocol suite)
 

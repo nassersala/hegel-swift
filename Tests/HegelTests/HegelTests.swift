@@ -109,7 +109,9 @@ let adult = zip(
     /// lexicographically-largest lowercase letter, so the shrunk string is
     /// exactly one character long).
     @Test func failingStringShrinksSmall() throws {
-        let gen = Gen<String>.string(count: 0...20, codec: "ascii")
+        // Lowercase letters only: with full ASCII the ~7%-per-string chance
+        // of drawing a 'z' made this test flake a few runs in a thousand.
+        let gen = Gen<String>.string(count: 0...20, codec: "ascii", codepoints: 0x61...0x7A)
         do {
             try forAll(gen, database: "") { s in
                 if s.contains("z") { throw HegelError.internalError("has z") }

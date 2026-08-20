@@ -9,6 +9,9 @@ let package = Package(
     ],
     products: [
         .library(name: "Hegel", targets: ["Hegel"]),
+        // Swift Testing sugar (expectAll). A separate product so importing
+        // Hegel never links the Testing framework.
+        .library(name: "HegelTesting", targets: ["HegelTesting"]),
     ],
     targets: [
         // FFI layer over the vendored header + prebuilt release dylib in
@@ -28,9 +31,13 @@ let package = Package(
                 ])
             ]
         ),
+        .target(
+            name: "HegelTesting",
+            dependencies: ["Hegel"]
+        ),
         .testTarget(
             name: "HegelTests",
-            dependencies: ["Hegel", "CHegel"]
+            dependencies: ["Hegel", "HegelTesting", "CHegel"]
         ),
     ]
 )

@@ -25,6 +25,7 @@ let package = Package(
             name: "AdhanPropertyTests",
             dependencies: [
                 .product(name: "Hegel", package: "hegel-swift"),
+                .product(name: "HegelTesting", package: "hegel-swift"),
                 .product(name: "Adhan", package: "adhan-swift"),
             ],
             linkerSettings: [
