@@ -83,7 +83,7 @@ struct Gen<Value> {
 
 and everything else is function composition — `map`, `flatMap`, `filter`, `zip`.
 
-This is not a stylistic overlay on Hegel; it *is* Hegel's model. Hypothesis deliberately rejected type-directed generation: a "strategy" is a value you build and pass explicitly, not a canonical instance the compiler finds for you. A `Gen` is that strategy, materialized as a Swift value. The protocol-witness style and the choice-sequence engine are the same idea at two levels — **behavior as data passed explicitly, with policy owned by the substrate**.
+The protocol-witness style and the choice-sequence engine are the same idea at two levels — **behavior as data passed explicitly, with policy owned by the substrate**.
 
 What the witness style buys, concretely:
 
@@ -92,7 +92,7 @@ What the witness style buys, concretely:
 - **Shrinking composes for free.** Combinators never touch the choice sequence, so every composed generator shrinks correctly with zero shrinker code — the exact property that `Arbitrary.shrink` designs lose the moment two shrinkers must agree about an invariant.
 - **No ceremony at the edges.** Generators are values: store them in arrays, pick them with `oneOf`, parameterize them with functions, namespace them as statics on `Gen`.
 
-The cost is honest: you pass generators explicitly instead of having the compiler infer them. In practice that line — `try forAll(adult) { ... }` — is documentation.
+The cost is tiny: you pass generators explicitly instead of having the compiler infer them. 
 
 ## Getting libhegel
 
