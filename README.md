@@ -73,7 +73,7 @@ Swift has no Hypothesis-quality PBT library. SwiftCheck follows the QuickCheck m
 
 ### Why there is no `Arbitrary` protocol here
 
-This library uses **protocol witnesses, not protocols** (in the sense of Brandon Williams' *"Protocol Witnesses"* talk): the one abstraction is a plain struct,
+This library uses **protocol witnesses, not protocols**: the one abstraction is a plain struct,
 
 ```swift
 struct Gen<Value> {
