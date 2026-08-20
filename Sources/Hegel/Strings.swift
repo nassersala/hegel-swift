@@ -168,7 +168,7 @@ func withCStringArray<R>(
     _ body: (UnsafePointer<UnsafePointer<CChar>?>?, Int) throws -> R
 ) throws -> R {
     guard let strings else { return try body(nil, 0) }
-    var duplicated: [UnsafeMutablePointer<CChar>?] = strings.map { strdup($0) }
+    let duplicated: [UnsafeMutablePointer<CChar>?] = strings.map { strdup($0) }
     defer { duplicated.forEach { free($0) } }
     let constPointers = duplicated.map { UnsafePointer($0) }
     return try constPointers.withUnsafeBufferPointer { buffer in

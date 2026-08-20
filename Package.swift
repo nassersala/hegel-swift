@@ -14,22 +14,14 @@ let package = Package(
         .library(name: "HegelTesting", targets: ["HegelTesting"]),
     ],
     targets: [
-        // FFI layer over the vendored header + prebuilt release dylib in
-        // Vendor/libhegel. See README "Getting libhegel".
-        .systemLibrary(name: "CHegel", path: "Sources/CHegel"),
+        // libhegel v0.32.5 built from the pinned hegel-rust tag and wrapped
+        // as a dynamic CHegel.framework per slice (header + module map
+        // inside), so consumers need no linker flags, rpaths, or install-
+        // name surgery. Rebuild with Scripts/build-xcframework.sh.
+        .binaryTarget(name: "CHegel", path: "Vendor/CHegel.xcframework"),
         .target(
             name: "Hegel",
-            dependencies: ["CHegel"],
-            linkerSettings: [
-                .unsafeFlags([
-                    "-LVendor/libhegel",
-                    // Executables land in .build/<triple>/<config>/ (3 levels
-                    // below the package root); .xctest bundles nest their
-                    // binary 3 levels deeper still. Cover both.
-                    "-Xlinker", "-rpath", "-Xlinker", "@loader_path/../../../Vendor/libhegel",
-                    "-Xlinker", "-rpath", "-Xlinker", "@loader_path/../../../../../../Vendor/libhegel",
-                ])
-            ]
+            dependencies: ["CHegel"]
         ),
         .target(
             name: "HegelTesting",

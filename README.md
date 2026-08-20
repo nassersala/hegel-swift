@@ -21,7 +21,7 @@ try forAll(adult) { user in
 
 When that property fails, you don't get a random 47-field counterexample — you get the *minimal* one, shrunk by the same engine that shrinks for Hypothesis, plus a reproduce blob that replays it exactly.
 
-> **Status: pre-alpha, but alive.** The core loop — run lifecycle, integer/bool/double/bytes draws, collections, spans, filtering, shrinking, failure reporting with reproduce blobs — compiles and passes its suite against the real engine (libhegel v0.32.5, vendored prebuilt). The shrinker test asserts that `n >= 10` shrinks to exactly `10`. See [Roadmap](#roadmap) for what's missing.
+> **Status: pre-alpha, but alive.** The core loop — run lifecycle, integer/bool/double/bytes draws, collections, spans, filtering, shrinking, failure reporting with reproduce blobs — compiles and passes its suite against the real engine (libhegel v0.32.5, vendored as a binary target). The shrinker test asserts that `n >= 10` shrinks to exactly `10`. See [Roadmap](#roadmap) for what's missing.
 
 ## Why
 
@@ -70,16 +70,16 @@ The cost is honest: you pass generators explicitly instead of having the compile
 
 ## Getting libhegel
 
-`Vendor/libhegel/` carries the prebuilt release dylib (darwin/arm64) and its matching `hegel.h`, straight from the [hegel-rust releases page](https://github.com/hegeldev/hegel-rust/releases) with the published SHA-256 verified. `swift build` and `swift test` work out of the box on Apple Silicon — the package links and rpaths against the vendored copy.
+`Vendor/CHegel.xcframework` vendors libhegel v0.32.5 as a binary target: one dynamic `CHegel.framework` per slice, each carrying the dylib, the canonical `hegel.h`, and a module map. `swift build` and `swift test` work out of the box — no linker flags, no rpaths, no install-name surgery; SPM/Xcode link and embed the framework wherever the package is consumed.
 
-To upgrade or target another platform, download `libhegel-<os>-<arch>.<ext>` + `.sha256` from a release into `Vendor/libhegel/` as `libhegel.dylib`, verify the checksum, refresh `hegel.h` from the same tag, and (macOS) re-stamp the install name:
+The slices are built from the pinned tag of [hegeldev/hegel-rust](https://github.com/hegeldev/hegel-rust) (upstream releases ship prebuilt dylibs for desktop platforms only, so iOS requires building from source anyway). To upgrade, bump `TAG` in `Scripts/build-xcframework.sh` and rebuild against a checkout of that tag:
 
 ```sh
-install_name_tool -id @rpath/libhegel.dylib Vendor/libhegel/libhegel.dylib
-codesign -f -s - Vendor/libhegel/libhegel.dylib
+git -C ~/src/hegel-rust worktree add /tmp/hegel-rust-vX.Y.Z vX.Y.Z
+HEGEL_RUST=/tmp/hegel-rust-vX.Y.Z Scripts/build-xcframework.sh --slices macos,ios,ios-sim
 ```
 
-The canonical ABI is `hegel-c/include/hegel.h` in [hegeldev/hegel-rust](https://github.com/hegeldev/hegel-rust); this binding tracks it. Reproduce blobs are version-pinned — a stored counterexample replays only on the libhegel version that produced it.
+The script refuses to build from a checkout that isn't exactly at the pinned tag. The canonical ABI is `hegel-c/include/hegel.h` in hegel-rust; this binding tracks it. Reproduce blobs are version-pinned — a stored counterexample replays only on the libhegel version that produced it.
 
 ## Example: properties for a real library
 
@@ -118,7 +118,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 
 | Layer | What it is | What it knows |
 |---|---|---|
-| `CHegel` | system-library target over `hegel.h` | nothing — raw ABI |
+| `CHegel` | binary target: `CHegel.framework` (libhegel + `hegel.h` + module map) per slice | nothing — raw ABI |
 | `Context` / `TestCase` | RAII handle wrappers; status codes → thrown Swift errors (`HEGEL_E_STOP_TEST` → overrun, `HEGEL_E_ASSUME` → rejection) | ownership + calling convention |
 | `Gen<Value>` | the witness: `(TestCase) throws -> Value` + combinators | nothing about shrinking — by design |
 | `forAll` | the run loop: next-test-case / interpret / mark-complete; failures → shrunk blobs | the engine protocol |
@@ -133,7 +133,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [ ] Stateful testing (pools + state machines)
 - [ ] Targeted PBT (`hegel_target`)
 - [x] Swift Testing integration sugar: `expectAll` + `.propertyTesting` trait (motivated by the adhan dogfood: bare `#expect` inside a `forAll` property doesn't shrink)
-- [ ] Vendored binary artifact of `libhegel` so `swift test` works out of the box
+- [x] Binary target: `CHegel.xcframework` vendored, built from the pinned hegel-rust tag (`Scripts/build-xcframework.sh`) — no linker flags or rpaths anywhere
 - [ ] Validate against `hegeldev/hegel-core` (the cross-language protocol suite)
 
 ## References
