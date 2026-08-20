@@ -128,7 +128,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [x] Compile against real `libhegel` (v0.32.5 prebuilt, SHA-verified); suite green incl. shrink-to-known-minimum
 - [x] String generators (text/regex/email/URL/domain, Unicode categories & codepoint ranges incl. Arabic) with RAII generator handles
 - [x] `replay(blob:)` + drawn-value display: `PropertyFailure` shows the shrunk counterexample, recovered by replaying the blob through the generator
-- [ ] Dates, times, UUIDs, IPs, big integers
+- [x] Dates/times/datetimes (`CalendarDate`/`TimeOfDay`/`CalendarDateTime` + `DateComponents` bridging), UUIDs, IPv4/IPv6, big integers (`UInt64`, `Int128`, `UInt128`)
 - [ ] Settings surface (seed, database path/key, phases, multiple-failure reporting)
 - [ ] Stateful testing (pools + state machines)
 - [ ] Targeted PBT (`hegel_target`)
