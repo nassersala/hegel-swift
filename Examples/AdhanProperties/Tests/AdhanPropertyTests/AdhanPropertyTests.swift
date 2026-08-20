@@ -129,14 +129,16 @@ let temperateScenario = scenario(latitudes: -55...55)
         }
     }
 
-    /// FOUND BUG (documented): in the high-latitude band (±75°) the
-    /// constructor can return non-nil times that are OUT OF ORDER — asr
-    /// lands before dhuhr near polar winter (first seen: lat ≈ -66,
-    /// June 2029: dhuhr 12:00, asr 11:13). A correct API would return nil
-    /// (as it does elsewhere) or ordered times. This test documents the
-    /// bug and prints Hegel's shrunk minimal counterexample; it will
-    /// start failing if upstream fixes it — then promote it to a real
-    /// ordering property.
+    /// FOUND BUG (filed upstream as
+    /// https://github.com/batoulapps/adhan-swift/issues/102): in the
+    /// high-latitude band (±75°) the constructor can return non-nil times
+    /// with asr OUT OF ORDER — before dhuhr on the same day
+    /// ((-75, 0), 2029-05-01: dhuhr 11:58Z, asr 04:17Z), or days after
+    /// the requested date ((-72, 0), 2000-08-01: asr lands on Aug 3).
+    /// A correct API would return nil (as it does elsewhere) or ordered
+    /// times. This test documents the bug and prints Hegel's shrunk
+    /// minimal counterexample; it will start failing if upstream fixes
+    /// it — then promote it to a real ordering property.
     @Test func highLatitudeUnorderedTimesBugIsStillPresent() throws {
         let gen = scenario(latitudes: -75...75)
         do {
