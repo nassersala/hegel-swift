@@ -101,8 +101,8 @@ The cost is tiny: you pass generators explicitly instead of having the compiler 
 The slices are built from the pinned tag of [hegeldev/hegel-rust](https://github.com/hegeldev/hegel-rust) (upstream releases ship prebuilt dylibs for desktop platforms only, so iOS requires building from source anyway). To upgrade, bump `TAG` in `Scripts/build-xcframework.sh` and rebuild against a checkout of that tag:
 
 ```sh
-git -C ~/src/hegel-rust worktree add /tmp/hegel-rust-vX.Y.Z vX.Y.Z
-HEGEL_RUST=/tmp/hegel-rust-vX.Y.Z Scripts/build-xcframework.sh --slices macos,ios,ios-sim
+git clone --branch vX.Y.Z --depth 1 https://github.com/hegeldev/hegel-rust
+Scripts/build-xcframework.sh --hegel-rust ./hegel-rust --slices macos,ios,ios-sim
 ```
 
 The script refuses to build from a checkout that isn't exactly at the pinned tag. The canonical ABI is `hegel-c/include/hegel.h` in hegel-rust; this binding tracks it. Reproduce blobs are version-pinned — a stored counterexample replays only on the libhegel version that produced it.

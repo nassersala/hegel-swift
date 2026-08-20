@@ -7,8 +7,8 @@
 //
 // Affordance correctness is the property that the two agree at every
 // reachable state: isEnabled(action) == isLegal(action). The model follows
-// the earlier Python/Hypothesis study in ~/src/pbt/alarm (cleanroom
-// sequence specification + Norman's affordance theory + PBT).
+// an earlier Python/Hypothesis study of the same idea: cleanroom sequence
+// specification + Norman's affordance theory + property-based testing.
 
 enum AlarmState: String, Sendable {
     case disarmed, armed, triggered

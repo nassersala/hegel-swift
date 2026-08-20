@@ -7,13 +7,14 @@
 # hegel-go loads via HEGEL_LIBHEGEL_PATH and dialectic links directly (all
 # three pin libhegel 0.32.5). The transcripts must match byte for byte.
 #
-# Requires a Go toolchain (brew install go), cmake, and a checkout of
-# dialectic (default ~/src/dialectic, override with DIALECTIC_DIR).
+# Requires a Go toolchain (brew install go). The dialectic column is
+# optional: set DIALECTIC_DIR to a dialectic checkout (and have cmake
+# installed) to include it, otherwise it is skipped.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 LIBHEGEL="$REPO_DIR/Vendor/CHegel.xcframework/macos-arm64/CHegel.framework/Versions/A/CHegel"
-DIALECTIC_DIR="${DIALECTIC_DIR:-$HOME/src/dialectic}"
+DIALECTIC_DIR="${DIALECTIC_DIR:-}"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
@@ -30,7 +31,7 @@ echo "== go transcript"
 # The dialectic column needs a local checkout (not present in CI): skip
 # with a notice rather than fail when it is missing.
 HAVE_DIALECTIC=0
-if [ -d "$DIALECTIC_DIR" ] && command -v cmake > /dev/null; then
+if [ -n "$DIALECTIC_DIR" ] && [ -d "$DIALECTIC_DIR" ] && command -v cmake > /dev/null; then
     HAVE_DIALECTIC=1
     echo "== dialectic transcript"
     cmake -S "$DIALECTIC_DIR" -B "$OUT/dialectic-build" \
@@ -45,7 +46,7 @@ if [ -d "$DIALECTIC_DIR" ] && command -v cmake > /dev/null; then
         -o "$OUT/transcript-dialectic"
     "$OUT/transcript-dialectic" 2>/dev/null | grep '^case ' > "$OUT/dialectic.txt"
 else
-    echo "== dialectic transcript: no checkout at $DIALECTIC_DIR (or no cmake); skipping"
+    echo "== dialectic transcript: set DIALECTIC_DIR to a dialectic checkout to include it; skipping"
 fi
 
 echo "== comparing $(wc -l < "$OUT/swift.txt" | tr -d ' ') cases"

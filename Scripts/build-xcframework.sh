@@ -8,11 +8,11 @@
 # embed it wherever it's consumed.
 #
 # Usage:
-#   Scripts/build-xcframework.sh [--hegel-rust <checkout>] [--slices macos,ios,ios-sim]
+#   Scripts/build-xcframework.sh --hegel-rust <checkout> [--slices macos,ios,ios-sim]
 #
-# The checkout must be at the tag this binding pins (TAG below); the script
-# refuses to build from anything else, and refuses if the checkout's
-# hegel.h differs from the one the framework will carry.
+# The checkout is a clone of https://github.com/hegeldev/hegel-rust at the
+# tag this binding pins (TAG below); the script refuses to build from
+# anything else. It may also be given as HEGEL_RUST in the environment.
 #
 # iOS slices need a rustup-managed toolchain with the aarch64-apple-ios /
 # aarch64-apple-ios-sim std targets installed:
@@ -24,7 +24,7 @@ MACOS_MIN="14.0"
 IOS_MIN="17.0"
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-HEGEL_RUST="${HEGEL_RUST:-$HOME/src/hegel-rust}"
+HEGEL_RUST="${HEGEL_RUST:-}"
 SLICES="macos"
 
 while [[ $# -gt 0 ]]; do
@@ -37,10 +37,17 @@ done
 
 # --- Verify the source checkout is exactly the pinned release -------------
 
+if [[ -z "$HEGEL_RUST" ]]; then
+    echo "error: no hegel-rust checkout given" >&2
+    echo "usage: $0 --hegel-rust <checkout> [--slices macos,ios,ios-sim]" >&2
+    echo "hint: git clone --branch $TAG --depth 1 https://github.com/hegeldev/hegel-rust" >&2
+    exit 2
+fi
+
 DESCRIBED=$(git -C "$HEGEL_RUST" describe --tags --exact-match 2>/dev/null || true)
 if [[ "$DESCRIBED" != "$TAG" ]]; then
     echo "error: $HEGEL_RUST is at '${DESCRIBED:-<no tag>}', need $TAG" >&2
-    echo "hint: git -C \"$HEGEL_RUST\" worktree add /tmp/hegel-rust-$TAG $TAG" >&2
+    echo "hint: git clone --branch $TAG --depth 1 https://github.com/hegeldev/hegel-rust" >&2
     exit 1
 fi
 HEADER="$HEGEL_RUST/hegel-c/include/hegel.h"
