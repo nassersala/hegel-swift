@@ -183,6 +183,29 @@ import HegelTesting  // re-exports Hegel
 
 On failure the test reports exactly two issues: the minimal counterexample (with its reproduce blob), and the body's own `#expect` failure replayed at that minimal input — pointing at the exact expectation that broke. The `.propertyTesting` trait keeps the search phase's intermediate failures out of the test results entirely; without it `expectAll` still works, but every failing probe shows up as a non-failing "known issue" line. Thrown errors keep their `forAll` meaning (`HegelError.assume` rejects the case; anything else is a violation).
 
+## Example: affordance correctness
+
+`Examples/AffordanceProperties` property-tests a user interface claim: what the user sees as possible is possible.
+
+```
+panel.isEnabled(action) == alarm.isLegal(action)    for every action, at every reachable state
+```
+
+A home alarm panel is modeled twice: the state machine (the truth about which actions are legal) and a view model exposing the enabled/disabled booleans a SwiftUI view would bind to. The engine drives the machine through its rules; an invariant checks the full affordance matrix after every step. A second rule attempts illegal actions and requires visible feedback.
+
+The buggy panel under test updates its visuals from the *event* instead of the *state*: on `reset` it hand-copies the armed visuals and leaves the trigger button disabled. The property catches it and shrinks the failure to the shortest user session after which the UI lies:
+
+```
+initial: disarmed
+  arm
+  trigger
+  reset
+invariant affordance correctness failed
+violated: trigger looks disabled but is legal (state: armed)
+```
+
+When this property fails in a real product, the user is in Norman's "gulf of execution": the interface misrepresents what the system will do. The Therac-25 accidents were this property violated with a beam button. The model here follows earlier work connecting cleanroom sequence specification (Prowell), affordance theory (Norman), and property-based testing; the state machine and the planted bug are ported from a Python/Hypothesis study of the same idea.
+
 ## Testing the binding itself
 
 Same strategy as the official bindings (hegel-go is the template), self-bootstrapped with the circularity broken deliberately:
