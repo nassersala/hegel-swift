@@ -39,35 +39,33 @@ public struct PropertyFailure: Error, CustomStringConvertible {
 /// reproduce blob.
 public func forAll<A>(
     _ gen: Gen<A>,
-    testCases: UInt64 = 100,
+    testCases: UInt64? = nil,
     seed: UInt64? = nil,
     database: String? = nil,
+    settings: Settings = Settings(),
     origin explicitOrigin: String? = nil,
     file: StaticString = #fileID,
     line: UInt = #line,
     _ property: (A) throws -> Void
 ) throws {
+    // The convenience parameters override the corresponding Settings
+    // fields, so the common knobs stay one label away.
+    var settings = settings
+    if let testCases { settings.testCases = testCases }
+    if let seed { settings.seed = seed }
+    if let database { settings.database = database }
+
     let ctx = Context()
     // Failures with the same origin are the same bug; the call site is the
     // stable identity of this property. Wrappers (HegelTesting's expectAll)
     // pass their own caller's location through `origin`.
     let origin = explicitOrigin ?? "\(file):\(line)"
 
-    var settings: OpaquePointer?
-    try check(hegel_settings_new(ctx.raw, &settings), ctx.lastError)
-    defer { _ = hegel_settings_free(ctx.raw, settings) }
-    try check(hegel_settings_set_test_cases(ctx.raw, settings, testCases), ctx.lastError)
-    if let seed {
-        try check(hegel_settings_set_seed(ctx.raw, settings, seed, true), ctx.lastError)
-    }
-    if let database {
-        // "" disables the example database entirely; nil keeps the engine
-        // default (.hegel/examples/, auto-disabled in CI).
-        try check(hegel_settings_set_database(ctx.raw, settings, database), ctx.lastError)
-    }
+    let rawSettings = try settings.makeHandle(ctx)
+    defer { _ = hegel_settings_free(ctx.raw, rawSettings) }
 
     var run: OpaquePointer?
-    try check(hegel_run_start(ctx.raw, settings, nil, nil, &run), ctx.lastError)
+    try check(hegel_run_start(ctx.raw, rawSettings, nil, nil, &run), ctx.lastError)
     defer { _ = hegel_run_free(ctx.raw, run) }
 
     while true {
@@ -78,6 +76,7 @@ public func forAll<A>(
 
         let tc = TestCase(ctx: ctx, raw: rawCase)
         let status: TestCaseStatus
+        var bugOrigin: String?
         do {
             let value = try gen.run(tc)
             try property(value)
@@ -88,11 +87,13 @@ public func forAll<A>(
             status = .invalid
         } catch {
             status = .interesting
+            // Suffix the thrown error's type so different failure modes of
+            // one property count as distinct bugs — that is what makes
+            // reportMultipleFailures able to report more than one.
+            bugOrigin = "\(origin) [\(String(reflecting: type(of: error)))]"
         }
         try check(
-            hegel_mark_complete(
-                ctx.raw, rawCase, status.rawValue,
-                status == .interesting ? origin : nil),
+            hegel_mark_complete(ctx.raw, rawCase, status.rawValue, bugOrigin),
             ctx.lastError)
     }
 
@@ -140,9 +141,5 @@ public func forAll<A>(
     }
 }
 
-// TODO: replay(blob:) via hegel_test_case_from_blob — rerun a stored
-//       counterexample so the frontend can display the drawn values.
-// TODO: surface more settings (seed, database path/key, phases,
-//       report_multiple_failures) as forAll parameters or a Settings struct.
 // TODO: route libhegel's output callback into a Swift closure instead of
 //       leaving it on stderr.

@@ -51,9 +51,10 @@ extension Trait where Self == IssueHandlingTrait {
 /// records and returns, one bug per distinct origin.
 public func expectAll<A>(
     _ gen: Gen<A>,
-    testCases: UInt64 = 100,
+    testCases: UInt64? = nil,
     seed: UInt64? = nil,
     database: String? = nil,
+    settings: Settings = Settings(),
     sourceLocation: SourceLocation = #_sourceLocation,
     _ property: (A) throws -> Void
 ) {
@@ -63,7 +64,7 @@ public func expectAll<A>(
         try ExpectAllSearch.$violationFlag.withValue(flag) {
             try forAll(
                 gen, testCases: testCases, seed: seed, database: database,
-                origin: origin
+                settings: settings, origin: origin
             ) { value in
                 // Two interception layers, whichever is installed wins:
                 // the .propertyTesting trait swallows the issue and sets
