@@ -1,0 +1,5 @@
+module CHegel {
+    header "shim.h"
+    link "hegel"
+    export *
+}
