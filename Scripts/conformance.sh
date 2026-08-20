@@ -27,18 +27,26 @@ echo "== go transcript"
     && HEGEL_LIBHEGEL_PATH="$LIBHEGEL" "$OUT/transcript-go" 2>/dev/null) \
     | grep '^case ' > "$OUT/go.txt"
 
-echo "== dialectic transcript"
-cmake -S "$DIALECTIC_DIR" -B "$OUT/dialectic-build" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DDIALECTIC_LIBHEGEL_LIBRARY="$LIBHEGEL" \
-    -DDIALECTIC_BUILD_TESTS=OFF -DDIALECTIC_BUILD_EXAMPLES=OFF > /dev/null
-cmake --build "$OUT/dialectic-build" > /dev/null
-clang -std=c99 -Wall -Wextra -I "$DIALECTIC_DIR/include" \
-    "$REPO_DIR/Conformance/transcript-dialectic/main.c" \
-    "$OUT/dialectic-build/libdialectic.a" "$LIBHEGEL" \
-    -Wl,-rpath,"$REPO_DIR/Vendor/CHegel.xcframework/macos-arm64" \
-    -o "$OUT/transcript-dialectic"
-"$OUT/transcript-dialectic" 2>/dev/null | grep '^case ' > "$OUT/dialectic.txt"
+# The dialectic column needs a local checkout (not present in CI): skip
+# with a notice rather than fail when it is missing.
+HAVE_DIALECTIC=0
+if [ -d "$DIALECTIC_DIR" ] && command -v cmake > /dev/null; then
+    HAVE_DIALECTIC=1
+    echo "== dialectic transcript"
+    cmake -S "$DIALECTIC_DIR" -B "$OUT/dialectic-build" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DDIALECTIC_LIBHEGEL_LIBRARY="$LIBHEGEL" \
+        -DDIALECTIC_BUILD_TESTS=OFF -DDIALECTIC_BUILD_EXAMPLES=OFF > /dev/null
+    cmake --build "$OUT/dialectic-build" > /dev/null
+    clang -std=c99 -Wall -Wextra -I "$DIALECTIC_DIR/include" \
+        "$REPO_DIR/Conformance/transcript-dialectic/main.c" \
+        "$OUT/dialectic-build/libdialectic.a" "$LIBHEGEL" \
+        -Wl,-rpath,"$REPO_DIR/Vendor/CHegel.xcframework/macos-arm64" \
+        -o "$OUT/transcript-dialectic"
+    "$OUT/transcript-dialectic" 2>/dev/null | grep '^case ' > "$OUT/dialectic.txt"
+else
+    echo "== dialectic transcript: no checkout at $DIALECTIC_DIR (or no cmake); skipping"
+fi
 
 echo "== comparing $(wc -l < "$OUT/swift.txt" | tr -d ' ') cases"
 status=0
@@ -46,7 +54,7 @@ if ! diff -u "$OUT/go.txt" "$OUT/swift.txt"; then
     echo "FAIL: hegel-swift and hegel-go disagree on the choice sequence" >&2
     status=1
 fi
-if ! diff -u "$OUT/go.txt" "$OUT/dialectic.txt"; then
+if [ "$HAVE_DIALECTIC" -eq 1 ] && ! diff -u "$OUT/go.txt" "$OUT/dialectic.txt"; then
     echo "FAIL: dialectic and hegel-go disagree on the choice sequence" >&2
     status=1
 fi
