@@ -81,6 +81,12 @@ codesign -f -s - Vendor/libhegel/libhegel.dylib
 
 The canonical ABI is `hegel-c/include/hegel.h` in [hegeldev/hegel-rust](https://github.com/hegeldev/hegel-rust); this binding tracks it. Reproduce blobs are version-pinned — a stored counterexample replays only on the libhegel version that produced it.
 
+## Example: properties for a real library
+
+`Examples/AdhanProperties` property-tests [adhan-swift](https://github.com/batoulapps/adhan-swift) (Islamic prayer times): ordering of the five prayers, madhab moving only asr, qibla always a bearing, times belonging to their day. **The first run found a real bug**: in the high-latitude band the library can return non-nil, out-of-order times — Hegel shrank it to the minimal reproduction `(lat -72, lon 0), 2000-08-01, muslimWorldLeague` (asr lands before dhuhr near polar winter). ~1,700 generated cases run in ~13 ms.
+
+Dogfood lesson, worth knowing: **properties must `throw` on violation.** A bare `#expect` inside `forAll` records a Swift Testing issue but returns normally, so the engine counts the case as valid and never shrinks it. (Swift Testing integration sugar to close this gap is on the roadmap.)
+
 ## Testing the binding itself
 
 Same strategy as the official bindings (hegel-go is the template), self-bootstrapped with the circularity broken deliberately:
@@ -109,7 +115,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [ ] Settings surface (seed, database path/key, phases, multiple-failure reporting)
 - [ ] Stateful testing (pools + state machines)
 - [ ] Targeted PBT (`hegel_target`)
-- [ ] Swift Testing / XCTest integration sugar
+- [ ] Swift Testing / XCTest integration sugar (motivated by the adhan dogfood: bare `#expect` inside a property doesn't shrink)
 - [ ] Vendored binary artifact of `libhegel` so `swift test` works out of the box
 - [ ] Validate against `hegeldev/hegel-core` (the cross-language protocol suite)
 
