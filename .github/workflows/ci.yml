@@ -26,6 +26,8 @@ jobs:
         run: swift test --package-path Examples/AdhanProperties
       - name: Test example (AffordanceProperties)
         run: swift test --package-path Examples/AffordanceProperties
+      - name: Test example (RegexProperties)
+        run: swift test --package-path Examples/RegexProperties
       - name: Test AffordanceProperties on iOS simulator
         working-directory: Examples/AffordanceProperties
         run: |

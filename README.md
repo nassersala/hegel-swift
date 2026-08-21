@@ -158,11 +158,49 @@ Generation biases toward short lists, so at 200 cases random search finds `sum >
 
 Measured caveat: targeting is only as good as the gradient. On Die Hard, `maximize: -|big − 4|` made discovery worse than random search, because `big = 3` and `big = 5` both score −1 while being structurally far from the solution. The score must measure real progress toward the bug.
 
+## Metamorphic relations: testing without an oracle
+
+Prayer times have no oracle — nothing says what fajr at (51.5, −0.1) on 2024-03-09 *should* be. What can be said is how the times must respond to a *change* of input. Chen's metamorphic testing names that: a **source** input and its output, a **follow-up** input derived from it, and a relation over the two executions (the *metamorphic group*). Here a relation is a value, like `Gen` and `Rule`:
+
+```swift
+let fajrAngleUp = Relation<Query, Times>(
+    "fajr angle up ⇒ fajr earlier or equal, nothing else moves",
+    followUp: { q, tc in
+        var q = q
+        q.params.fajrAngle += Double(try tc.drawInteger(in: Int64(1)...6))
+        return q
+    },
+    holds: { a, b in
+        guard b.fajr <= a.fajr else { throw RelationViolated("fajr moved later") }
+        try expectEqual(a, b, except: [.fajr])
+    })
+
+try forAll(
+    source: temperateQuery,
+    relations: [fajrAngleUp, ishaAngleUp, adjustmentShifts, longitudeShift, fourYearsLater],
+    subject: prayerTimes)
+```
+
+Per case the engine draws a source and one relation, runs the subject on source and follow-up, and checks. Whatever the follow-up drew (the angle increment, the longitude delta) is in the choice sequence, so a violation shrinks to the minimal group and is displayed as one:
+
+```
+relation: Δ° east ⇒ every time 4Δ min earlier (±1 min rounding)
+  source:       (0.0, -180.0) 2000-1-1 muslimWorldLeague fajr 18.0° isha 17.0°
+  follow-up:    (0.0, -179.0) 2000-1-1 muslimWorldLeague fajr 18.0° isha 17.0°
+  f(source):    fajr 31T16:44  sunrise 31T17:59  dhuhr 01T00:04  asr 01T03:29  maghrib 01T06:07  isha 01T07:17
+  f(follow-up): fajr 01T16:41  sunrise 01T17:56  dhuhr 02T00:01  asr 02T03:25  maghrib 02T06:03  isha 02T07:14
+violated: fajr shifted 1437.0 min, expected -4.0
+```
+
+That is the longitude relation's first run against adhan: at longitude −180 (and within a few ulps of it) the library computes the previous local day — it treats −180 as +180 — so one degree east moves every prayer a day later. An edge case, not a practical bug, but a discontinuity in a function that should be continuous in longitude, and the shrinker walked straight to it (the generator's bound). `AdhanMetamorphicTests.swift` pins it and keeps the relation's domain a hair off the boundary.
+
+Two patterns ship as constructors, named after Zhou, Sun, Chen and Towey's MR patterns: `.invariant(_:under:)` (symmetry — `sort(reversed(xs)) == sort(xs)`) and `.monotone(_:followUp:_:_:)` (change direction). `HegelError.assume` in a follow-up rejects a source the relation doesn't apply to. Chains of relations — several follow-ups checked against the original — are the stateful machine with transforms as rules; nothing more is needed. Chen's "beyond necessary properties" point shows up in the adhan set: the four-years-later relation is a hypothesis with a tolerance, not a theorem — its first version, one year later, shrank to the leap-year drift at grazing twilight, fajr 24 min off at (−55, 0), 2000-02-02 → 2001.
+
 ## Example: properties for a real library
 
 `Examples/AdhanProperties` property-tests [adhan-swift](https://github.com/batoulapps/adhan-swift) (Islamic prayer times): ordering of the five prayers, madhab moving only asr, qibla always a bearing, times belonging to their day. **The first run found a real bug** ([batoulapps/adhan-swift#102](https://github.com/batoulapps/adhan-swift/issues/102)): in the high-latitude band the library can return non-nil, out-of-order times — asr before dhuhr on the same day, or landing days after the requested date. Hegel shrank it to the minimal reproduction `(lat -72, lon 0), 2000-08-01, muslimWorldLeague`. ~1,700 generated cases run in ~13 ms.
 
-The example also includes a stateful machine: rules move a probe clock around a generated day while an invariant pins the `currentPrayer`/`nextPrayer` contract (before fajr it's `(nil, fajr)`, from isha on `(isha, nil)`, otherwise `next` is `current`'s successor and the clock sits in `[time(current), time(next))`).
+The example also includes a stateful machine: rules move a probe clock around a generated day while an invariant pins the `currentPrayer`/`nextPrayer` contract (before fajr it's `(nil, fajr)`, from isha on `(isha, nil)`, otherwise `next` is `current`'s successor and the clock sits in `[time(current), time(next))`) — and the metamorphic relations above.
 
 Dogfood lesson, worth knowing: **properties passed to `forAll` must `throw` on violation.** A bare `#expect` inside `forAll` records a Swift Testing issue but returns normally, so the engine counts the case as valid and never shrinks it. `expectAll` (below) exists because of this.
 
@@ -213,6 +251,25 @@ xcodebuild test -scheme AffordanceProperties-Package -destination 'platform=iOS 
 
 When this property fails in a real product, the user is in Norman's "gulf of execution": the interface misrepresents what the system will do. The Therac-25 accidents were this property violated with a beam button. The model here follows earlier work connecting cleanroom sequence specification (Prowell), affordance theory (Norman), and property-based testing; the state machine and the planted bug are ported from a Python/Hypothesis study of the same idea.
 
+## Example: the Swift regex engine, compiler-style
+
+`Examples/RegexProperties` does to `Regex` what EMI (Le, Afshari, Su, PLDI 2014) does to GCC and GraphicsFuzz (Donaldson et al., OOPSLA 2017) does to shader compilers: rewrite the program without changing its meaning and require the same output. The program is a small regex AST the engine generates (`a–c`, classes, `|`, `*+?`, `{m,n}`, groups); the rewrites are identities applied at an engine-chosen node; the output is every match range plus whole-match, in a text drawn to match the pattern half the time:
+
+```swift
+rewrite("R+ ⇒ RR*") {
+    if case .plus(let r) = $0 { return .cat([r, .star(r)]) }
+    return nil
+}
+rewrite("R{m,n} ⇒ R{m}R{0,n−m}") { … }
+rewrite("R ⇒ (?:R|z+)  (dead alternative, equivalence modulo this text)") { … }
+```
+
+Eight rewrite relations × 2000 cases, an alternation-reorder relation on whole-match only (order changes *which* match leftmost-first picks, not whether one exists), and a cross-program relation — Swift's engine and ICU's `NSRegularExpression` on the same query must agree. All of it runs in 0.3 s, and the Swift engine passes.
+
+What the shrinker found instead was two false premises of mine, each reduced to one line. The dead-alternative relation's first run: `/a/ on "az"` — the regex-shaped text generator pads with arbitrary characters, so `z` was not dead; the texts now come from the `a–c` alphabet with `a–c` padding. The ICU comparison's first run: `/(?:b*|a)/ on "a"` — I had computed ICU's whole-match as an anchored *first* match, which is the leftmost-first match at 0 (`b*` = empty) and not "some path reaches the end"; `\A(?:R)\z` is. That is what a violated relation means in Chen's framing: a bug in the subject or a wrong conjecture in the relation, and shrinking makes it obvious which.
+
+One engineering note the example documents: Swift's engine backtracks without memoization, so `(?:(?:a|ab)*)*`-shaped patterns on a 20-character text do not terminate in useful time — true of every backtracking engine, not a finding. The generator bounds quantifier nesting to two and texts to ten characters.
+
 ## Testing the binding itself
 
 Same strategy as the official bindings (hegel-go is the template), self-bootstrapped with the circularity broken deliberately:
@@ -241,6 +298,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [x] `Settings` on `forAll`/`expectAll`: seed, derandomize, database path/key, phases, multiple-failure reporting (distinct thrown error types = distinct bugs), verbosity, single-test-case mode
 - [x] Stateful testing: `forAll(initial:rules:invariants:)` over engine state machines (rule selection, step budget, whole-step shrinking) + `Pool` for reuse of previously generated values; failing runs display as minimal rule traces
 - [x] Targeted PBT: `tc.target(score)` in property bodies (`forAll` passes the `TestCase` to two-parameter closures) + `maximize:` on stateful runs
+- [x] Metamorphic relations: `forAll(source:relations:subject:)` + `Relation`, the `.invariant`/`.monotone` patterns, failures displayed as the metamorphic group
 - [x] Swift Testing integration sugar: `expectAll` + `.propertyTesting` trait (motivated by the adhan dogfood: bare `#expect` inside a `forAll` property doesn't shrink)
 - [x] Binary target: `CHegel.xcframework` vendored, built from the pinned hegel-rust tag (`Scripts/build-xcframework.sh`) — no linker flags or rpaths anywhere
 - [x] Differential conformance vs hegel-go: identical seed → identical draw transcript, same engine binary (`Scripts/conformance.sh`)
@@ -252,6 +310,8 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [hegeldev/hegel-rust](https://github.com/hegeldev/hegel-rust) — reference implementation + canonical `hegel.h`
 - Brandon Williams, *Protocol Witnesses* — the design stance behind `Gen`
 - [Hypothesis](https://hypothesis.readthedocs.io) — the model this all descends from
+- Chen, Cheung, Yiu, [*Metamorphic Testing: A New Approach for Generating Next Test Cases*](https://arxiv.org/abs/2002.12543) (1998) · Chen & Tse, [*New Visions on Metamorphic Testing after a Quarter of a Century of Inception*](https://dl.acm.org/doi/10.1145/3468264.3473136) (ESEC/FSE 2021) — the source/follow-up/group vocabulary behind `Relation`
+- Alzahrani, Spichkova, Harland, [*Application of property-based testing tools for metamorphic testing*](https://arxiv.org/abs/2211.12003) (2022) — metamorphic testing as a kind of PBT, the stance `forAll(source:relations:subject:)` takes
 
 ## Crafted By:
 Nasser Ali Alzahrani [@nassersala](http://twitter.com/nassersala)
