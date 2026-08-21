@@ -93,18 +93,18 @@ let pathQuery: Gen<PathQuery> = array(of: segment, count: 1...4).map { PathQuery
     }
 
     /// FOUND by the "x/.." relation on its first run, shrunk to `"a"` vs
-    /// `"x/../a"`: `URL.standardized` on a *relative* file URL applies RFC
-    /// 3986's remove_dot_segments to the relative path alone, and that
-    /// algorithm — specified only for the merged absolute path — turns
-    /// `x/../a` into `/a`: the result is an absolute URL `file:///a`, the
-    /// base is gone, and an app that checked `path.hasPrefix(root)` would
-    /// now deny a legitimate request (or, resolving `relativePath` itself,
-    /// look in the wrong place). `a/x/..` and `./a` standardize correctly;
-    /// only a `..` that consumes the first segment trips it.
-    /// `absoluteURL.standardized` and `standardizedFileURL` are right. In the
-    /// same family as swift-corelibs-foundation #3234 (SR-14145,
-    /// "URL.standardized turns a path into a hostname"). This test pins the
-    /// behavior so a Foundation fix shows up.
+    /// `"x/../a"`: on macOS 26 (Swift 6.3 Foundation) `URL.standardized` on
+    /// a *relative* file URL applies RFC 3986's remove_dot_segments to the
+    /// relative path alone, and that algorithm — specified only for the
+    /// merged absolute path — turns `x/../a` into `/a`: the result is an
+    /// absolute URL `file:///a`, the base is gone, and an app that checked
+    /// `path.hasPrefix(root)` would now deny a legitimate request. `a/x/..`
+    /// and `./a` standardize correctly; only a `..` that consumes the first
+    /// segment trips it. `absoluteURL.standardized` and `standardizedFileURL`
+    /// are right. The CI runner's older Foundation does NOT do this — it is
+    /// a regression, reported as swiftlang/swift-foundation#2198 (same
+    /// family as swift-corelibs-foundation #3234). This test pins the
+    /// behavior where present, and passes quietly where absent.
     @Test func standardizedOnARelativeURLEscapesTheBase() throws {
         let relativeStandardized: @Sendable (PathQuery) -> Resolution = { q in
             let target = URL(filePath: q.requested, relativeTo: root).standardized
@@ -118,7 +118,7 @@ let pathQuery: Gen<PathQuery> = array(of: segment, count: 1...4).map { PathQuery
                 relations: [Self.relations[1]],  // inserting "x/.."
                 testCases: 300, database: "",
                 subject: relativeStandardized)
-            Issue.record("Foundation's URL.standardized on relative URLs appears FIXED — fold this into the main relation set")
+            print("this Foundation standardizes relative URLs correctly (swift-foundation#2198 absent or fixed)")
         } catch let failure as PropertyFailure {
             let group = try #require(failure.failures.first?.counterexample)
             #expect(group.contains("follow-up:    \"x/../a\""))
