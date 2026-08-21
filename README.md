@@ -270,6 +270,36 @@ What the shrinker found instead was two false premises of mine, each reduced to 
 
 One engineering note the example documents: Swift's engine backtracks without memoization, so `(?:(?:a|ab)*)*`-shaped patterns on a 20-character text do not terminate in useful time — true of every backtracking engine, not a finding. The generator bounds quantifier nesting to two and texts to ten characters.
 
+## Example: security properties
+
+`Examples/SecurityProperties` takes the shape Chen et al. ("Metamorphic Testing for Cybersecurity", *IEEE Computer* 2016) and Mai, Pastore, Goknil and Briand ("Metamorphic Security Testing for Web Systems", ICST 2020) give security testing: a secure decision must not change when the attacker-controlled part of the input changes. Subjects are Apple's own.
+
+**CryptoKit — any mutation must be rejected.** The source verifies; the follow-up, one engine-drawn mutation (flip a bit, delete, duplicate or append a byte) of the attacker-visible part, must not:
+
+```swift
+mutationIsRejected("one mutation of nonce‖ciphertext‖tag ⇒ rejected") { s, tc in
+    var s = s
+    s.combined = try Mutation.any(for: s.combined.count, tc).apply(to: s.combined)
+    return s
+}
+```
+
+AES-GCM and ChaCha20-Poly1305 (box and key), Ed25519 and P-256 ECDSA (message and signature), HMAC-SHA256 (message and MAC): 4000 mutations, all rejected.
+
+**Path resolution — spelling must not change the decision.** An app resolves a requested path under its root and checks the result is still inside. Relations: inserting `.`, inserting `x/..`, doubling a slash, a `./` prefix ⇒ same resolved file; more `..` than depth ⇒ OUTSIDE. The relations settled which Foundation API that code should call, and found one thing:
+
+```
+relation: inserting "x/.."
+  source:       "a"
+  follow-up:    "x/../a"  ("x/.." at 0)
+  f(source):    /srv/app/store/a (inside root)
+  f(follow-up): /a (OUTSIDE root)
+```
+
+`URL.standardized` on a *relative* file URL applies RFC 3986's `remove_dot_segments` to the relative path alone; that algorithm is defined for the merged absolute path, and on `x/../a` it yields `/a` — the result is `file:///a`, the base is gone. `a/x/..` and `./a` are fine; only a `..` that consumes the first segment trips it. Same family as swift-corelibs-foundation #3234 ("URL.standardized turns a path into a hostname"). `absoluteURL.standardized` is right but keeps `a//a` as two segments (correct for a URL, not for a file); `standardizedFileURL` is the one. The example pins the `.standardized` behavior so a fix shows up, and uses `standardizedFileURL`.
+
+**URL parsers — one string, one authority.** `URL`, `URLComponents` and `NSURL` on strings shaped like authority-confusion attacks (`u:pa@b@host`, `\`, `%40`, `#`/`?` in the path, IPv6, IDN, odd ports) must agree on scheme, user, host and port, or all reject. They do — after two representation choices the first run surfaced in every one of its ~60 disagreement classes, worth knowing if a check compares hosts across APIs: `URLComponents.host` keeps IPv6 brackets (`[::1]`, where `URL.host` and `NSURL.host` give `::1`) and decodes IDNA (`☃.com`, where the others keep `xn--n3h.com`; `encodedHost` matches).
+
 ## Testing the binding itself
 
 Same strategy as the official bindings (hegel-go is the template), self-bootstrapped with the circularity broken deliberately:
@@ -311,6 +341,8 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - Brandon Williams, *Protocol Witnesses* — the design stance behind `Gen`
 - [Hypothesis](https://hypothesis.readthedocs.io) — the model this all descends from
 - Chen, Cheung, Yiu, [*Metamorphic Testing: A New Approach for Generating Next Test Cases*](https://arxiv.org/abs/2002.12543) (1998) · Chen & Tse, [*New Visions on Metamorphic Testing after a Quarter of a Century of Inception*](https://dl.acm.org/doi/10.1145/3468264.3473136) (ESEC/FSE 2021) — the source/follow-up/group vocabulary behind `Relation`
+- Chen, Kuo, Ma, Susilo, Towey, Voas, Zhou, [*Metamorphic Testing for Cybersecurity*](https://csrc.nist.gov/pubs/journal/2016/06/metamorphic-testing-for-cybersecurity/final) (IEEE Computer 2016) · Mai, Pastore, Goknil, Briand, [*Metamorphic Security Testing for Web Systems*](https://arxiv.org/abs/1912.05278) (ICST 2020) — the shape of `Examples/SecurityProperties`
+- Le, Afshari, Su, *Compiler Validation via Equivalence Modulo Inputs* (PLDI 2014) · Donaldson, Evrard, Lascu, Thomson, *Automated Testing of Graphics Shader Compilers* (OOPSLA 2017) — the shape of `Examples/RegexProperties`
 - Alzahrani, Spichkova, Harland, [*Application of property-based testing tools for metamorphic testing*](https://arxiv.org/abs/2211.12003) (2022) — metamorphic testing as a kind of PBT, the stance `forAll(source:relations:subject:)` takes
 
 ## Crafted By:
