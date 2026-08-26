@@ -1,0 +1,288 @@
+// Experiment code from 2026-08-22 (see specs/usage-models.md "Experiment").
+// Ran as a scratch package depending on hegel-swift by path; both files of
+// its test target concatenated here so it can be recreated. Not built in CI.
+
+import Testing
+import Hegel
+
+// Sequence-based enumeration of a one-time-code login, Cleanroom style:
+// an enumeration table is the spec; rules, a completeness check and a
+// usage model are DERIVED from it; hegel runs it against an implementation.
+
+enum Stimulus: String, CaseIterable, Sendable { case enterPhone, send, goodCode, badCode, resend, back }
+enum Response: String, Sendable { case none, showCodeField, showError, lockOut, signIn }
+enum Canonical: String, CaseIterable, Sendable { case start, phoneEntered, codeSent, oneBad, twoBad, locked, done }
+
+struct Row: Sendable {
+    let state: Canonical, stimulus: Stimulus, response: Response, next: Canonical, requirement: String
+}
+/// A cell is legal (a Row) or illegal (must never happen in this state).
+struct Cell: Hashable { let state: Canonical; let stimulus: Stimulus }
+
+// MARK: The enumeration table (the spec)
+
+let table: [Row] = [
+    Row(state: .start, stimulus: .enterPhone, response: .none, next: .phoneEntered, requirement: "R1 phone first"),
+    Row(state: .phoneEntered, stimulus: .enterPhone, response: .none, next: .phoneEntered, requirement: "R1"),
+    Row(state: .phoneEntered, stimulus: .send, response: .showCodeField, next: .codeSent, requirement: "R2 send issues a code"),
+    Row(state: .phoneEntered, stimulus: .back, response: .none, next: .start, requirement: "R3 back"),
+    Row(state: .codeSent, stimulus: .goodCode, response: .signIn, next: .done, requirement: "R4 good code signs in"),
+    Row(state: .codeSent, stimulus: .badCode, response: .showError, next: .oneBad, requirement: "R5 bad code shows error"),
+    Row(state: .codeSent, stimulus: .resend, response: .showCodeField, next: .codeSent, requirement: "R6 resend keeps the attempt count"),
+    Row(state: .codeSent, stimulus: .back, response: .none, next: .phoneEntered, requirement: "R3"),
+    Row(state: .oneBad, stimulus: .goodCode, response: .signIn, next: .done, requirement: "R4"),
+    Row(state: .oneBad, stimulus: .badCode, response: .showError, next: .twoBad, requirement: "R5"),
+    Row(state: .oneBad, stimulus: .resend, response: .showCodeField, next: .oneBad, requirement: "R6"),
+    Row(state: .oneBad, stimulus: .back, response: .none, next: .phoneEntered, requirement: "R3"),
+    Row(state: .twoBad, stimulus: .goodCode, response: .signIn, next: .done, requirement: "R4"),
+    Row(state: .twoBad, stimulus: .badCode, response: .lockOut, next: .locked, requirement: "R7 three bad codes lock"),
+    Row(state: .twoBad, stimulus: .resend, response: .showCodeField, next: .twoBad, requirement: "R6"),
+    Row(state: .twoBad, stimulus: .back, response: .none, next: .phoneEntered, requirement: "R3"),
+    Row(state: .locked, stimulus: .enterPhone, response: .none, next: .locked, requirement: "R8 locked ignores everything"),
+    Row(state: .locked, stimulus: .send, response: .none, next: .locked, requirement: "R8"),
+    Row(state: .locked, stimulus: .goodCode, response: .none, next: .locked, requirement: "R8 — decided: a good code does NOT unlock"),
+    Row(state: .locked, stimulus: .badCode, response: .none, next: .locked, requirement: "R8"),
+    Row(state: .locked, stimulus: .resend, response: .none, next: .locked, requirement: "R8"),
+    Row(state: .locked, stimulus: .back, response: .none, next: .locked, requirement: "R8"),
+] + Stimulus.allCases.map { Row(state: .done, stimulus: $0, response: .none, next: .done, requirement: "R9 done is absorbing") }
+
+/// Cells the UI cannot produce: the control isn't on screen.
+let illegal: Set<Cell> = [
+    Cell(state: .start, stimulus: .send), Cell(state: .start, stimulus: .goodCode), Cell(state: .start, stimulus: .badCode),
+    Cell(state: .start, stimulus: .resend), Cell(state: .start, stimulus: .back),
+    Cell(state: .phoneEntered, stimulus: .goodCode), Cell(state: .phoneEntered, stimulus: .badCode), Cell(state: .phoneEntered, stimulus: .resend),
+    Cell(state: .codeSent, stimulus: .enterPhone), Cell(state: .codeSent, stimulus: .send),
+    Cell(state: .oneBad, stimulus: .enterPhone), Cell(state: .oneBad, stimulus: .send),
+    Cell(state: .twoBad, stimulus: .enterPhone), Cell(state: .twoBad, stimulus: .send),
+]
+
+/// Completeness: every (state, stimulus) is a row or an illegal mark, and never both.
+func missingCells(_ rows: [Row], _ illegal: Set<Cell>) -> [Cell] {
+    let covered = Set(rows.map { Cell(state: $0.state, stimulus: $0.stimulus) })
+    var missing: [Cell] = []
+    for s in Canonical.allCases { for st in Stimulus.allCases {
+        let c = Cell(state: s, stimulus: st)
+        if !covered.contains(c) && !illegal.contains(c) { missing.append(c) }
+    } }
+    return missing
+}
+
+// MARK: The implementation under test
+
+struct LoginScreen: Sendable {
+    enum Screen: Sendable { case phone, code, locked, home }
+    var screen = Screen.phone
+    var phone: String? = nil
+    var badSinceSend = 0
+    /// The planted bug: resend resets the attempt counter (unlimited guesses).
+    let resendResetsAttempts: Bool
+
+    mutating func handle(_ s: Stimulus) -> Response {
+        switch (screen, s) {
+        case (.phone, .enterPhone): phone = "+1"; return .none
+        case (.phone, .send): screen = .code; badSinceSend = 0; return .showCodeField
+        case (.phone, .back): phone = nil; return .none
+        case (.code, .goodCode): screen = .home; return .signIn
+        case (.code, .badCode):
+            badSinceSend += 1
+            if badSinceSend >= 3 { screen = .locked; return .lockOut }
+            return .showError
+        case (.code, .resend):
+            if resendResetsAttempts { badSinceSend = 0 }
+            return .showCodeField
+        case (.code, .back): screen = .phone; badSinceSend = 0; return .none
+        case (.locked, _), (.home, _): return .none
+        default: return .none
+        }
+    }
+}
+
+// MARK: Derivation: table → rules, invariants, usage model
+
+struct Model: Sendable, CustomStringConvertible {
+    var canonical = Canonical.start
+    var sut: LoginScreen
+    var history: [Stimulus] = []
+    var description: String { "\(canonical) after \(history.map(\.rawValue).joined(separator: " → "))" }
+}
+
+struct Mismatch: Error, CustomStringConvertible {
+    let state: Canonical, stimulus: Stimulus, expected: Response, got: Response, requirement: String
+    var description: String { "in \(state), \(stimulus): expected \(expected) (\(requirement)), got \(got)" }
+}
+
+/// One rule per legal cell. The engine chooses among them (no profile).
+func derivedRules(_ rows: [Row]) -> [Rule<Model>] {
+    rows.map { row in
+        Rule("\(row.state).\(row.stimulus)", precondition: { $0.canonical == row.state }) { m, _ in
+            let got = m.sut.handle(row.stimulus)
+            m.history.append(row.stimulus)
+            guard got == row.response else {
+                throw Mismatch(state: row.state, stimulus: row.stimulus, expected: row.response, got: got, requirement: row.requirement)
+            }
+            m.canonical = row.next
+        }
+    }
+}
+
+/// The usage model: weights per canonical state from "analytics". ONE rule
+/// whose step draws the next stimulus by weight — the profile is real.
+let usageWeights: [Canonical: [(Int, Stimulus)]] = [
+    .start: [(1, .enterPhone)],
+    .phoneEntered: [(9, .send), (1, .back), (1, .enterPhone)],
+    .codeSent: [(8, .goodCode), (2, .badCode), (1, .resend), (1, .back)],
+    .oneBad: [(6, .goodCode), (3, .badCode), (2, .resend), (1, .back)],
+    .twoBad: [(5, .goodCode), (3, .badCode), (2, .resend), (1, .back)],
+    .locked: [(2, .back), (1, .goodCode), (1, .badCode), (1, .resend), (1, .enterPhone), (1, .send)],
+    .done: [(1, .back)],
+]
+
+func frequency<A>(_ weighted: [(Int, A)], _ tc: TestCase) throws -> A {
+    let total = weighted.reduce(0) { $0 + $1.0 }
+    var k = Int(try tc.drawInteger(in: 0...Int64(total - 1)))
+    for (w, a) in weighted { if k < w { return a }; k -= w }
+    return weighted.last!.1
+}
+
+func usageRule(_ rows: [Row]) -> Rule<Model> {
+    let lookup = Dictionary(uniqueKeysWithValues: rows.map { (Cell(state: $0.state, stimulus: $0.stimulus), $0) })
+    return Rule("usage") { m, tc in
+        let stimulus = try frequency(usageWeights[m.canonical]!, tc)
+        let row = lookup[Cell(state: m.canonical, stimulus: stimulus)]!
+        let got = m.sut.handle(stimulus)
+        m.history.append(stimulus)
+        guard got == row.response else {
+            throw Mismatch(state: row.state, stimulus: stimulus, expected: row.response, got: got, requirement: row.requirement)
+        }
+        m.canonical = row.next
+    }
+}
+
+let invariants: [Invariant<Model>] = [
+    Invariant("signed in only from a code state") { m in
+        if m.sut.screen == .home { guard m.canonical == .done else { throw Mismatch(state: m.canonical, stimulus: .goodCode, expected: .none, got: .signIn, requirement: "R4") } }
+    },
+]
+
+func initial(bug: Bool) -> Gen<Model> { Gen { _ in Model(sut: LoginScreen(resendResetsAttempts: bug)) } }
+
+// MARK: Experiments
+
+@Suite struct Enumeration {
+    @Test func tableIsComplete() {
+        #expect(missingCells(table, illegal).isEmpty)
+        // Drop the cell nobody writes and the check names it.
+        let without = table.filter { !($0.state == .locked && $0.stimulus == .goodCode) }
+        #expect(missingCells(without, illegal).map { "\($0.state).\($0.stimulus)" } == ["locked.goodCode"])
+    }
+
+    @Test func everyRequirementIsCited() {
+        let cited = Set(table.map { $0.requirement.prefix(2) })
+        #expect(cited.isSuperset(of: ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9"]))
+    }
+
+    @Test func correctImplementationPassesBothDrivers() throws {
+        try forAll(initial: initial(bug: false), rules: derivedRules(table), invariants: invariants, testCases: 300, database: "")
+        try forAll(initial: initial(bug: false), rules: [usageRule(table)], invariants: invariants, testCases: 300, database: "")
+    }
+
+    @Test func buggyImplementationDerivedRules() throws {
+        for seed in UInt64(1)...5 {
+            do {
+                try forAll(initial: initial(bug: true), rules: derivedRules(table), invariants: invariants, testCases: 200, seed: seed, database: "")
+                print("EXP>>> derived seed \(seed): NOT FOUND")
+            } catch let f as PropertyFailure {
+                print("EXP>>> derived seed \(seed):\n\(f.failures.first?.counterexample ?? "-")")
+            }
+        }
+    }
+
+    @Test func buggyImplementationUsageModel() throws {
+        for seed in UInt64(1)...5 {
+            do {
+                try forAll(initial: initial(bug: true), rules: [usageRule(table)], invariants: invariants, testCases: 1000, seed: seed, database: "")
+                print("EXP>>> usage seed \(seed): NOT FOUND")
+            } catch let f as PropertyFailure {
+                print("EXP>>> usage seed \(seed):\n\(f.failures.first?.counterexample ?? "-")")
+            }
+        }
+    }
+}
+import Testing
+import Hegel
+
+// Aaron Hsu's shape: each canonical state is NAMED by its sequence, one block
+// per state listing EVERY stimulus, illegal cells inline (∘∘∘), response ⋄ →next.
+
+enum Outcome: Sendable { case respond(Response, next: String, req: String); case illegal }
+typealias Block = [Stimulus: Outcome]
+
+// Canonical sequences: "" (nothing), "P" (phone), "P.S" (sent), "P.S.b" (one bad),
+// "P.S.b.b" (two bad), "P.S.b.b.b" (locked), "P.S.g" (signed in).
+let spec: [String: Block] = [
+    "": [.enterPhone: .respond(.none, next: "P", req: "R1"),
+         .send: .illegal, .goodCode: .illegal, .badCode: .illegal, .resend: .illegal, .back: .illegal],
+    "P": [.enterPhone: .respond(.none, next: "P", req: "R1"),          // P.P ≡ P
+          .send: .respond(.showCodeField, next: "P.S", req: "R2"),
+          .goodCode: .illegal, .badCode: .illegal, .resend: .illegal,
+          .back: .respond(.none, next: "", req: "R3")],                // P.B ≡ ""
+    "P.S": [.enterPhone: .illegal, .send: .illegal,
+            .goodCode: .respond(.signIn, next: "P.S.g", req: "R4"),
+            .badCode: .respond(.showError, next: "P.S.b", req: "R5"),
+            .resend: .respond(.showCodeField, next: "P.S", req: "R6"),  // P.S.r ≡ P.S — the decision
+            .back: .respond(.none, next: "P", req: "R3")],
+    "P.S.b": [.enterPhone: .illegal, .send: .illegal,
+              .goodCode: .respond(.signIn, next: "P.S.g", req: "R4"),
+              .badCode: .respond(.showError, next: "P.S.b.b", req: "R5"),
+              .resend: .respond(.showCodeField, next: "P.S.b", req: "R6"),
+              .back: .respond(.none, next: "P", req: "R3")],
+    "P.S.b.b": [.enterPhone: .illegal, .send: .illegal,
+                .goodCode: .respond(.signIn, next: "P.S.g", req: "R4"),
+                .badCode: .respond(.lockOut, next: "P.S.b.b.b", req: "R7"),
+                .resend: .respond(.showCodeField, next: "P.S.b.b", req: "R6"),
+                .back: .respond(.none, next: "P", req: "R3")],
+    "P.S.b.b.b": Dictionary(uniqueKeysWithValues: Stimulus.allCases.map { ($0, Outcome.respond(.none, next: "P.S.b.b.b", req: "R8")) }),
+    "P.S.g": Dictionary(uniqueKeysWithValues: Stimulus.allCases.map { ($0, Outcome.respond(.none, next: "P.S.g", req: "R9")) }),
+]
+
+/// Completeness, visible and mechanical: every block has every stimulus, every →next is a block.
+func gridProblems(_ spec: [String: Block]) -> [String] {
+    var out: [String] = []
+    for (state, block) in spec {
+        for s in Stimulus.allCases where block[s] == nil { out.append("\(state) missing \(s)") }
+        for case let .respond(_, next, _) in block.values where spec[next] == nil { out.append("\(state) → \(next) undefined") }
+    }
+    return out.sorted()
+}
+
+struct GridModel: Sendable { var state = ""; var sut: LoginScreen }
+
+func gridRules(_ spec: [String: Block]) -> [Rule<GridModel>] {
+    spec.flatMap { state, block in
+        block.compactMap { stimulus, outcome -> Rule<GridModel>? in
+            guard case let .respond(expected, next, req) = outcome else { return nil }
+            return Rule("\(state.isEmpty ? "Δ" : state) ▸ \(stimulus)", precondition: { $0.state == state }) { m, _ in
+                let got = m.sut.handle(stimulus)
+                guard got == expected else {
+                    throw Mismatch(state: .start, stimulus: stimulus, expected: expected, got: got, requirement: req)
+                }
+                m.state = next
+            }
+        }
+    }
+}
+
+@Suite struct Grid {
+    @Test func gridIsComplete() {
+        #expect(gridProblems(spec).isEmpty)
+        var broken = spec; broken["P.S.b.b.b"]![.goodCode] = nil
+        #expect(gridProblems(broken) == ["P.S.b.b.b missing goodCode"])
+    }
+    @Test func gridFindsTheResendBug() throws {
+        do {
+            try forAll(initial: Gen { _ in GridModel(sut: LoginScreen(resendResetsAttempts: true)) }, rules: gridRules(spec), testCases: 200, seed: 1, database: "")
+            Issue.record("expected the bug")
+        } catch let f as PropertyFailure { print("EXP>>>\n\(f.failures.first?.counterexample ?? "-")") }
+        try forAll(initial: Gen { _ in GridModel(sut: LoginScreen(resendResetsAttempts: false)) }, rules: gridRules(spec), testCases: 300, database: "")
+    }
+}

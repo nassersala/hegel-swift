@@ -103,8 +103,12 @@ let pathQuery: Gen<PathQuery> = array(of: segment, count: 1...4).map { PathQuery
     /// segment trips it. `absoluteURL.standardized` and `standardizedFileURL`
     /// are right. The CI runner's older Foundation does NOT do this — it is
     /// a regression, reported as swiftlang/swift-foundation#2198 (same
-    /// family as swift-corelibs-foundation #3234). This test pins the
-    /// behavior where present, and passes quietly where absent.
+    /// family as swift-corelibs-foundation #3234). Maintainers confirmed
+    /// the diagnosis; fixed by swift-foundation#1942 (release/6.4.x: Swift
+    /// 6.4, macOS 27). Verified on the 6.4 and main nightlies and on the
+    /// macOS 27 beta (26A5416b) via Scripts/check-url-standardized.swift.
+    /// This test pins the behavior
+    /// where present and requires the fix where Foundation is new enough.
     @Test func standardizedOnARelativeURLEscapesTheBase() throws {
         let relativeStandardized: @Sendable (PathQuery) -> Resolution = { q in
             let target = URL(filePath: q.requested, relativeTo: root).standardized
@@ -120,6 +124,9 @@ let pathQuery: Gen<PathQuery> = array(of: segment, count: 1...4).map { PathQuery
                 subject: relativeStandardized)
             print("this Foundation standardizes relative URLs correctly (swift-foundation#2198 absent or fixed)")
         } catch let failure as PropertyFailure {
+            if #available(macOS 27, iOS 27, *) {
+                Issue.record("swift-foundation#2198 should be fixed here (#1942): \(failure)")
+            }
             let group = try #require(failure.failures.first?.counterexample)
             #expect(group.contains("follow-up:    \"x/../a\""))
             #expect(group.contains("f(follow-up): /a (OUTSIDE root)"))
