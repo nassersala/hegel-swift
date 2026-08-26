@@ -30,6 +30,14 @@ jobs:
         run: swift test --package-path Examples/RegexProperties
       - name: Test example (SecurityProperties)
         run: swift test --package-path Examples/SecurityProperties
+      - name: Test example (ComplexProperties)
+        run: swift test --package-path Examples/ComplexProperties
+      - name: Test example (AgentProperties)
+        run: swift test --package-path Examples/AgentProperties
+      - name: Test example (AsyncProperties)
+        run: swift test --package-path Examples/AsyncProperties
+      - name: Test example (ScheduleProperties)
+        run: swift test --package-path Examples/ScheduleProperties
       - name: Test AffordanceProperties on iOS simulator
         working-directory: Examples/AffordanceProperties
         run: |
@@ -58,3 +66,18 @@ jobs:
           go-version: stable
       - name: Compare draw transcripts with hegel-go
         run: Scripts/conformance.sh
+
+  foundation-6-4:
+    # swift-foundation#2198 (URL.standardized on a relative file URL drops
+    # the base) is fixed by #1942 on release/6.4.x. On Linux swift-foundation
+    # is Foundation, so this checks the fix before macOS 27 ships it. The
+    # SecurityProperties test pins the bug where present and passes where
+    # absent; this job checks the "absent" side is real.
+    runs-on: ubuntu-latest
+    container: swiftlang/swift:nightly-6.4.x-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Versions
+        run: swift --version
+      - name: URL.standardized on a relative file URL keeps the base
+        run: swift Scripts/check-url-standardized.swift

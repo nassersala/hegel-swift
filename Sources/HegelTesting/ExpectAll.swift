@@ -113,3 +113,129 @@ public func expectAll<A>(
         Issue.record(error, sourceLocation: sourceLocation)
     }
 }
+
+/// `expectAll` for an `async` body. Same interception and replay as the
+/// synchronous form; see `forAll`'s async overload for cancellation and
+/// `timeout` semantics.
+public func expectAll<A>(
+    _ gen: Gen<A>,
+    testCases: UInt64? = nil,
+    seed: UInt64? = nil,
+    database: String? = nil,
+    settings: Settings = Settings(),
+    timeout: Duration? = nil,
+    sourceLocation: SourceLocation = #_sourceLocation,
+    _ property: (A) async throws -> Void
+) async {
+    let origin = "\(sourceLocation.fileID):\(sourceLocation.line)"
+    let flag = OSAllocatedUnfairLock(initialState: false)
+    do {
+        try await ExpectAllSearch.$violationFlag.withValue(flag) {
+            try await forAll(
+                gen, testCases: testCases, seed: seed, database: database,
+                settings: settings, timeout: timeout, origin: origin
+            ) { value in
+                flag.withLock { $0 = false }
+                var thrown: (any Error)?
+                await withKnownIssue(isIntermittent: true) {
+                    do { try await property(value) } catch { thrown = error }
+                } matching: { _ in
+                    flag.withLock { $0 = true }
+                    return true
+                }
+                if let thrown { throw thrown }
+                if flag.withLock({ $0 }) { throw ExpectationViolation() }
+            }
+        }
+    } catch let failure as PropertyFailure {
+        if let runError = failure.runError {
+            Issue.record("hegel run errored: \(runError)", sourceLocation: sourceLocation)
+            return
+        }
+        for f in failure.failures {
+            Issue.record(
+                """
+                property failed; minimal counterexample: \
+                \(f.counterexample ?? "<unavailable>")\
+                \(f.reproduceBlob.map { "\n reproduce blob: \($0)" } ?? "")
+                """,
+                sourceLocation: sourceLocation)
+            guard let blob = f.reproduceBlob, let value = try? replay(gen, blob: blob) else {
+                continue
+            }
+            do { try await property(value) } catch {
+                Issue.record(error, sourceLocation: sourceLocation)
+            }
+        }
+    } catch {
+        Issue.record(error, sourceLocation: sourceLocation)
+    }
+}
+
+// MARK: - Suites and relations
+
+/// `forAll(_ suite:)` for Swift Testing: one run per law, every violated
+/// law recorded as its own issue with the minimal `LawCase` and reproduce
+/// blob. Law checks throw rather than `#expect`, so there is no
+/// interception layer here — just the report.
+public func expectAll(
+    _ suite: LawSuite,
+    testCases: UInt64? = nil,
+    seed: UInt64? = nil,
+    database: String? = nil,
+    settings: Settings = Settings(),
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    record(sourceLocation) {
+        try forAll(
+            suite, testCases: testCases, seed: seed, database: database,
+            settings: settings,
+            origin: "\(sourceLocation.fileID):\(sourceLocation.line)")
+    }
+}
+
+/// `forAll(source:relations:subject:)` for Swift Testing: a violated
+/// relation is recorded as an issue with the minimal metamorphic group and
+/// reproduce blob.
+public func expectAll<Input, Output>(
+    source: Gen<Input>,
+    relations: [Relation<Input, Output>],
+    testCases: UInt64? = nil,
+    seed: UInt64? = nil,
+    database: String? = nil,
+    settings: Settings = Settings(),
+    sourceLocation: SourceLocation = #_sourceLocation,
+    subject: @escaping @Sendable (Input) throws -> Output
+) {
+    record(sourceLocation) {
+        try forAll(
+            source: source, relations: relations,
+            testCases: testCases, seed: seed, database: database,
+            settings: settings, subject: subject)
+    }
+}
+
+/// Runs a throwing `forAll` and turns its `PropertyFailure` into issues:
+/// one per distinct bug, with the counterexample and blob; a run error or
+/// an engine-level error as a single record.
+private func record(_ sourceLocation: SourceLocation, _ body: () throws -> Void) {
+    do {
+        try body()
+    } catch let failure as PropertyFailure {
+        if let runError = failure.runError {
+            Issue.record("hegel run errored: \(runError)", sourceLocation: sourceLocation)
+            return
+        }
+        for f in failure.failures {
+            Issue.record(
+                """
+                property failed; minimal counterexample:
+                \(f.counterexample ?? "<unavailable>")\
+                \(f.reproduceBlob.map { "\n reproduce blob: \($0)" } ?? "")
+                """,
+                sourceLocation: sourceLocation)
+        }
+    } catch {
+        Issue.record(error, sourceLocation: sourceLocation)
+    }
+}
