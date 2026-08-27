@@ -57,7 +57,9 @@ red. The bubbles are the implementation's own trace, not a live oracle: the
 app does not link Lean, the test does.
 
 The affordance property (`affordancesMatchLeanEnabled`) is the
-`AffordanceProperties` idea with a proved legality function as oracle. Text
+`AffordanceProperties` idea with a proved legality function as oracle; a
+screen that hides Back when locked (`hidesBackWhenLocked`) is caught at the
+lock, four steps in. Text
 validation (empty phone, empty code) is deliberately outside it: the text is
 the stimulus's argument, not the machine's state, so the model does not know
 about it and the buttons disable on `!isEnabled || text.isEmpty`.

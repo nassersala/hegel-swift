@@ -77,6 +77,33 @@ private let affordances = Invariant<Modelled<Session, LeanModel>>("affordances m
         }
     }
 
+    /// A screen that hides Back when locked: the machine still allows it,
+    /// Lean says it is enabled, the screen says it is not. Caught the moment
+    /// the lock is reached.
+    @Test func hiddenBackWhenLockedIsAnAffordanceViolation() throws {
+        do {
+            try forAll(
+                sut: Gen { _ in
+                    let vm = LoginViewModel(); vm.hidesBackWhenLocked = true; return Session(model: vm)
+                },
+                model: LeanModel.initial,
+                commands: commands, consistent: consistent, invariants: [affordances],
+                testCases: 300, seed: 1, database: "")
+            Issue.record("the planted UI bug was not found")
+        } catch let failure as PropertyFailure {
+            let trace = try #require(failure.failures.first?.counterexample)
+            #expect(trace == """
+                initial: sut phone/0, model phone/0
+                  send -> showCodeField
+                  badCode -> showError
+                  badCode -> showError
+                  badCode -> lockOut
+                  invariant affordances match Lean enabled failed
+                violated: back looks disabled but Lean says legal in locked/3
+                """, "\(trace)")
+        }
+    }
+
     /// The intents a button calls go through the same `handle`.
     @Test func intentsAreTheStateMachine() {
         let vm = LoginViewModel()

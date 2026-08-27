@@ -30,6 +30,9 @@ public final class LoginViewModel {
 
     /// The planted bug: resend clears the attempt counter.
     public var resendResetsAttempts: Bool
+    /// The planted UI bug: the locked screen offers no way back. The state
+    /// machine still accepts `back`; the screen just does not show it.
+    public var hidesBackWhenLocked = false
 
     /// One handled stimulus, for the explainer.
     public struct Step: Identifiable, Sendable {
@@ -55,7 +58,7 @@ public final class LoginViewModel {
         switch (screen, s) {
         case (.phone, .enterPhone), (.phone, .send), (.phone, .back): true
         case (.code, .goodCode), (.code, .badCode), (.code, .resend), (.code, .back): true
-        case (.locked, .back): true
+        case (.locked, .back): !hidesBackWhenLocked
         default: false
         }
     }
