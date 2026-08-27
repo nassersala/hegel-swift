@@ -322,7 +322,7 @@ let commands: [Command<LoginScreen, Model>] = Stimulus.allCases.map { s in
 }
 ```
 
-The Swift screen inherits the theorems it refines: a screen whose resend resets the counter violates `resend_keeps_attempts`, and with `consistent:` comparing the counter it shrinks to three steps. Lean also rejected the first draft of the invariant, and α found a counter-after-sign-in discrepancy no response reveals. Both examples need their prover only to regenerate; the Agda table is checked in, the Lean one is built in CI.
+The Swift screen inherits the theorems it refines: a screen whose resend resets the counter violates `resend_keeps_attempts`, and with `consistent:` comparing the counter it shrinks to three steps. Lean also rejected the first draft of the invariant, and α found a counter-after-sign-in discrepancy no response reveals. The same example carries the account race from `Examples/ScheduleProperties` as a Lean *relation* (`Lean/Bank`): the schedule is the drawn input, the run yields a trace of semantic events, and every event must be enabled in the relation where it fires. Lean proves every safe path keeps the balance non-negative; Hegel shows the safe actor refines that relation under 300 schedules, that the unsafe actor refines the *unsafe* relation (the race is a behaviour the model admits, not a refinement failure), and shrinks the race to one deviation with its event trace. Both examples need their prover only to regenerate; the Agda table is checked in, the Lean one is built in CI.
 
 ## Example: properties for a real library
 
@@ -594,7 +594,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [x] Schedules as inputs: controlled scheduler on public API, `Schedule` = deviations from depth-first shrinking to a one-line story, byte-stable replay, measured reach (what escapes and what does not); `Examples/ScheduleProperties` (`specs/async-experiments.md` E2a–c)
 - [x] Model-based testing: `Command<SUT, Model>` (args from the model, run, model, post/equal/effect-only forms), `forAll(sut:model:commands:consistent:)`, `Rule.describeStep`, `frequency`; `Examples/DequeProperties` (swift-collections `Deque` vs `[Int]`) and the Agda door consumer both lower onto it (`specs/model-based.md`)
 - [x] Enumeration: `Enumeration<State, Stimulus, Response>` from an exhaustive `switch` (compiler-checked) or blocks (`problems()`-checked); `walk`, `commands(run:)`; OTP login in the library tests, the Agda door consumer loads its JSON into it
-- [x] Lean-verified model with a counter, consumed as an evaluator: `lake build` to C, linked into the test, `Command` calls the proved `step`; `Examples/LeanVerifiedModel`
+- [x] Lean-verified model with a counter, consumed as an evaluator: `lake build` to C, linked into the test, `Command` calls the proved `step`; the login screen on the simulator with affordances checked against Lean's `enabled`; the account race against a Lean relation with `safe_paths_nonneg` proved and the race shrunk to one deviation; `Examples/LeanVerifiedModel`
 - [x] Agda-verified finite-model experiment: Agda proves properties of one executable transition function and exports its complete table; Hegel checks a separate Swift implementation against it and shrinks a planted refinement bug to one command; `Examples/AgdaVerifiedModel`
 - [ ] Validate against `hegeldev/hegel-core` (the cross-language protocol suite)
 

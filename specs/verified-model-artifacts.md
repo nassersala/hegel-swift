@@ -132,13 +132,35 @@ producers here.
   `Hegel.swiftmodule` in an example's `.build` reads as "cannot find type".
   Clean the example's `.build/arm64-apple-macosx`.
 
+## Concurrency: relations, schedules as the resolver
+
+The stateful form needs a deterministic `step`. A concurrent model is a
+relation: several events enabled at once. What was built (`Lean/Bank`,
+`ConcurrencyTests.swift`) resolves it without a new API: the *schedule* is
+Hegel's drawn input (as in `ScheduleProperties`), the run produces a trace
+of semantic events recorded at the subject's boundary, and refinement is
+"the trace is a path of the relation and the model's final observation is
+the subject's". So `enabled`/`step` over the ABI are enough; no successor
+selection inside `model:`, because the subject already chose.
+
+Results: the safe actor refines the safe relation under 300 schedules and
+inherits `safe_paths_nonneg` on them; the unsafe actor refines the unsafe
+relation, so the race is a behaviour the model admits (Lean's
+`unsafe_race`), not a refinement failure; the invariant property shrinks to
+one deviation with the event trace as explanation. Instrumentation at the
+guard and the debit is synchronous and preserved the race for the three
+fixed policies. This answers the parked verified-concurrency draft's
+question at its E4 stage with Lean instead of Agda; its kill criteria did
+not fire (no ABI assumptions, no executor queues in the model, ~60 lines
+of Lean for the domain).
+
 ## Not done
 
 - The prover runtime for iOS, so a test could run on the simulator. Not
   needed: the oracle is test-side.
-- Nondeterministic models (a relation with several permitted outcomes):
-  `model:` would have to pick the successor matching the observation, as a
-  draw so it shrinks. Wait for an example.
+- Nondeterministic models inside `Command` (the stateful form drawing the
+  successor). The concurrency section shows the schedule-resolved form
+  instead; the `Command` form still waits for an example.
 - Dumping Lean's answers over the finite reachable space to JSON so the
   app could show "Lean says" live. Cute, second artifact to maintain.
 - Provenance (source digests, tool versions in the artifact). Add when two

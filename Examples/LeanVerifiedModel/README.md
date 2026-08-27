@@ -84,3 +84,35 @@ target a newer macOS than the package minimum; harmless.
 
 Trusted, not checked: the C emitted by Lean, the tag encoding on the Swift
 side (the Lean side's is proved), and the Lean runtime.
+
+## Concurrency: the account race against a Lean relation
+
+`Lean/Bank` is the two-withdrawals race from `Examples/ScheduleProperties` as
+a labelled transition system: state `(balance, phase A, phase B)`, events
+`checkPass`, `checkFail`, `commit` per task, and two relations, `unsafe`
+(check, suspend, commit) and `safe` (check and commit are one event). The
+schedule is not in the model; which enabled event fires is decided by the
+controlled scheduler in Swift. Lean proves `safe_paths_nonneg`: every safe
+path from the initial state ends with a non-negative balance (by induction
+over paths), and `unsafe_race`: the unsafe relation admits
+`checkPass a, checkPass b, commit a, commit b` ending at −100.
+
+`Tests/.../ConcurrencyTests.swift` instruments the actor at its semantic
+boundary (the guard and the debit, both synchronous, so no suspension is
+added; fixed policies give the same balances as the uninstrumented fixture)
+and checks, per drawn schedule, that the recorded event trace is a path of
+the relation and that Lean's final balance is Swift's:
+
+- the safe withdrawal refines the safe relation under 300 schedules, so its
+  balance is covered by the theorem;
+- the unsafe withdrawal refines the unsafe relation too: the race is not a
+  refinement failure, it is a behaviour the model admits, which is what
+  `unsafe_race` says; the model is what is wrong;
+- Hegel finds the schedule that breaks the invariant and shrinks it to one
+  deviation (`at choice point 2 run ready[0]`), with the event trace
+  `checkPass(b), checkPass(a), commit(a), commit(b)` as the explanation.
+
+The Lean runtime is initialised once (`pthread_once`) and per thread
+(`lean_initialize_thread`, undeclared in `lean.h` like
+`lean_initialize_runtime_module`); Swift Testing runs suites on several
+threads and the first version crashed for exactly that reason.

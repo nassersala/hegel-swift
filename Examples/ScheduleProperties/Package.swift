@@ -11,6 +11,9 @@ let package = Package(
     platforms: [
         .macOS(.v15)  // TaskExecutor and ExecutorJob.runSynchronously(on: UnownedTaskExecutor)
     ],
+    products: [
+        .library(name: "Schedules", targets: ["Schedules"])
+    ],
     dependencies: [
         .package(path: "../..")
     ],

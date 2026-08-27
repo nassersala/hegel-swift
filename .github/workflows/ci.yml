@@ -45,7 +45,7 @@ jobs:
       - name: Install Lean (elan)
         run: curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain stable --no-modify-path
       - name: Build the Lean model (proofs + C)
-        run: cd Examples/LeanVerifiedModel/Lean && $HOME/.elan/bin/lake build Otp:static
+        run: cd Examples/LeanVerifiedModel/Lean && $HOME/.elan/bin/lake build Otp:static Bank:static
       - name: Test example (LeanVerifiedModel)
         run: swift test --package-path Examples/LeanVerifiedModel
       - name: Test AffordanceProperties on iOS simulator

@@ -20,11 +20,11 @@ let lakeLib = "\(Context.packageDirectory)/Lean/.lake/build/lib"
 
 let package = Package(
     name: "LeanVerifiedModel",
-    platforms: [.macOS(.v14), .iOS(.v17)],
+    platforms: [.macOS(.v15), .iOS(.v17)],
     products: [
         .library(name: "LoginUI", targets: ["LoginUI"])
     ],
-    dependencies: [.package(path: "../..")],
+    dependencies: [.package(path: "../.."), .package(path: "../ScheduleProperties")],
     targets: [
         // The screen: view model + SwiftUI view. Ships without Lean.
         .target(name: "LoginUI"),
@@ -33,11 +33,15 @@ let package = Package(
             cSettings: [.unsafeFlags(["-I", "\(leanSysroot)/include"])]),
         .testTarget(
             name: "LeanVerifiedModelTests",
-            dependencies: ["COtp", "LoginUI", .product(name: "Hegel", package: "hegel-swift")],
+            dependencies: [
+                "COtp", "LoginUI",
+                .product(name: "Hegel", package: "hegel-swift"),
+                .product(name: "Schedules", package: "ScheduleProperties"),
+            ],
             linkerSettings: [
                 .unsafeFlags([
                     "-L", lakeLib, "-L", "\(leanSysroot)/lib/lean", "-L", "\(leanSysroot)/lib",
-                    "-lotp_Otp", "-lInit", "-lleanrt", "-luv", "-lgmp", "-lc++",
+                    "-lotp_Otp", "-lotp_Bank", "-lInit", "-lleanrt", "-luv", "-lgmp", "-lc++",
                 ])
             ]),
     ]

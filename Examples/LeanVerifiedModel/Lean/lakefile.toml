@@ -3,3 +3,6 @@ defaultTargets = ["Otp"]
 
 [[lean_lib]]
 name = "Otp"
+
+[[lean_lib]]
+name = "Bank"

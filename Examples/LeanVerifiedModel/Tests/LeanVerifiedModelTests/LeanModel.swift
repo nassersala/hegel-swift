@@ -7,10 +7,12 @@ struct LeanModel: Sendable, CustomStringConvertible, Equatable {
     var screen: UInt8
     var attempts: UInt32
 
-    static let initial: LeanModel = {
+    /// Computed, not stored: `otp_init` also initialises the calling
+    /// thread for Lean, and tests run on several threads.
+    static var initial: LeanModel {
         otp_init()
         return LeanModel(packed: otp_initial_state())
-    }()
+    }
 
     init(packed: UInt64) {
         screen = UInt8((packed >> 8) & 0xff)
