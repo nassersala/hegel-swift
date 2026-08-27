@@ -611,6 +611,31 @@ This is presentation over the shrinker's result, not a stronger shrink: minimali
 
 The same relation, model-checked: `Examples/ScheduleProperties/TLA/Bank.tla` is the bank as a TLA+ spec (the LTS of `Examples/LeanVerifiedModel/Lean/Bank/Model.lean`), and TLC finds the unsafe counterexample in 5 states — `checkPass a, checkPass b, commit a, commit b` — the same abstract trace as the Lean witness and as hegel's shrunk event trace. It also checks what a finite test cannot: both variants terminate under weak fairness, and neither deadlocks. `TLA/Transfer.tla` is the transfer fixture: 79 states, and TLC's 5-state counterexample never touches C, breadth-first search reaching the violation before any independent event. Hegel on the same fixture: 200 schedules, 39 distinct traces, 3 classes under the relation, 1 failing. `TLA/run.sh` runs all four configurations.
 
+## Example: Lamport's quicksort, a nondeterministic model
+
+`Examples/Quicksort` is the algorithm from the two slides of Lamport's "Thinking Above the Code" (2014): state `(A, U)`, `U` the set of index ranges still to partition; `Next` picks any range in `U`, any pivot in it, and any element of `Partitions`. Recursion is not part of the algorithm. The three "pick any"s are draws:
+
+```swift
+public func draw(_ tc: TestCase) throws -> Step {
+    let ranges = u.sorted()
+    let r = ranges[Int(try tc.drawInteger(in: 0...Int64(ranges.count - 1)))]
+    if r.b == r.t { return .drop(r) }
+    let p = r.b + Int(try tc.drawInteger(in: 0...Int64(r.t - 1 - r.b)))
+    ...  // any element of Partitions(a, p, r.b, r.t): smallest k values left, rest right, each side in a drawn order
+    return .partition(r, p: p, after: after)
+}
+```
+
+So an abstract behaviour is generated data: it replays from the blob and shrinks toward the boring choice (first range, `p = b`, sorted order). `everyBehaviourSorts` checks the relation on drawn arrays and drawn choices; `TLA/Quicksort.tla` is the same relation and TLC checks it exhaustively for `N = 4` over `{0, 1, 2}`: 3,966 states, sorted permutation on `U = {}`, termination under weak fairness.
+
+Refinement is the property only hegel can check. A Hoare-partition recursive quicksort records each partition as a `Step`, and `Lamport.refines` replays the steps against the relation: every step must be enabled, and the run must end with `U` empty. The planted bug is Lomuto's split on Hoare's partition, recursing on `⟨b, p−1⟩` instead of `⟨b, p⟩`:
+
+```
+excludePivot: [0, 0] → drop ⟨0, -1⟩
+```
+
+The first bad step is a range the relation never produced, found before the sort is even wrong. A nondeterministic model chooses its successor by drawing it — `concurrency-semantics.md` asks how; this is the answer — and a deterministic implementation refines it by being one of its behaviours.
+
 ## Example: laws that fail for a reason
 
 `Examples/ComplexProperties` runs the catalog on swift-numerics' `Complex<Double>` with `equal:` = the library's own `isApproximatelyEqual` — relative tolerance, no absolute part: it accepts rounding and rejects cancellation, so what fails below fails because ℂ over doubles is not a field, not because the tolerance is ours. Inputs are log-uniform across fifteen decades (a mantissa in ±10 at a scale from 1e−12 to 1e3). Under that: `*` is a commutative monoid, `+` is commutative with identity 0, `z · (1/z) = 1` away from 0, `*` distributes over `+`, `|zw| = |z||w|`, conjugation is a ring automorphism and an involution (exactly), `exp(a + b) = exp(a) exp(b)`, `exp(iθ) = cos θ + i sin θ`, polar form round-trips.

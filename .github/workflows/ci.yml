@@ -43,6 +43,8 @@ jobs:
         run: swift test --package-path Examples/ScheduleProperties
       - name: Test example (DequeProperties)
         run: swift test --package-path Examples/DequeProperties
+      - name: Test example (Quicksort)
+        run: swift test --package-path Examples/Quicksort
       - name: Test example (AgdaVerifiedModel)
         run: swift test --package-path Examples/AgdaVerifiedModel
       - name: Install Lean (elan)
