@@ -90,7 +90,7 @@ enum RangeIndependence {
     }
 }
 
-@Suite struct ParallelQuicksort {
+extension Scheduled { @Suite struct ParallelQuicksort {
     static let arrays = array(of: Gen<Int>.int(in: 0...9), count: 2...8)
     static let schedules: Gen<Schedule> = array(
         of: Hegel.zip(Gen<Int64>.int(in: 0...40), Gen<Int64>.int(in: 0...7))
@@ -126,4 +126,4 @@ enum RangeIndependence {
         #expect(classes.count == 1)
         #expect(classes.first == RangeIndependence.normalForm(quicksort(a).steps))
     }
-}
+} }

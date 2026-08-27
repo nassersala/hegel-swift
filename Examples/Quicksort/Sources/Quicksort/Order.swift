@@ -107,3 +107,74 @@ public enum Propagators {
         return [here] + mergesort(values, indices: l) + mergesort(values, indices: r)
     }
 }
+
+// MARK: - The moving-data algorithm, projected onto the lattice
+
+extension Propagators {
+    /// Tags each value with its index so the moving-data algorithm keeps
+    /// element identity: `value * n + index`. Preserves `<` between
+    /// unequal values and orders ties by index, so every fact read off a
+    /// tagged partition is sound for the original values.
+    public static func tagged(_ values: [Int]) -> [Int] {
+        values.enumerated().map { $0.element * values.count + $0.offset }
+    }
+
+    /// A `Lamport` partition step on tagged values, read as a fact: the
+    /// elements that landed left are ≤ the elements that landed right.
+    /// `drop` steps learn nothing. This is the projection from the
+    /// relation that moves data to the lattice that accumulates knowledge.
+    public static func facts(of steps: [Lamport.Step], count n: Int) -> [Fact] {
+        steps.compactMap { step in
+            guard case .partition(let r, let p, let after) = step else { return nil }
+            let ids = after.map { $0 % n }
+            let k = p - r.b + 1
+            return cross(Array(ids[..<k]), Array(ids[k...]))
+        }
+    }
+}
+
+// MARK: - Threshold reads
+
+/// Mergesort as propagators with threshold reads (LVars): a node waits
+/// until the cell is total on each half, then merges with at most
+/// `|l| + |r| − 1` comparisons, learning only the pairs it compared; the
+/// cell's closure supplies the rest. The cost drops from O(n²) pairs to
+/// n log n comparisons, and blocking makes deadlock possible: a node whose
+/// threshold is never reached waits forever.
+public struct MergeNode: Sendable {
+    public let l: [Int], r: [Int]
+    public var indices: [Int] { l + r }
+
+    /// The nodes of the split tree of `n` indices, leaves excluded.
+    public static func tree(_ n: Int) -> [MergeNode] {
+        func nodes(_ s: [Int]) -> [MergeNode] {
+            guard s.count > 1 else { return [] }
+            let l = Array(s[..<(s.count / 2)]), r = Array(s[(s.count / 2)...])
+            return [MergeNode(l: l, r: r)] + nodes(l) + nodes(r)
+        }
+        return nodes(Array(0..<n))
+    }
+
+    /// Precondition: `order` is total on `l` and on `r`. Returns the pairs
+    /// compared and how many comparisons it took.
+    public func merge(_ values: [Int], given order: Order) -> (fact: Fact, comparisons: Int) {
+        func sorted(_ s: [Int]) -> [Int] { s.sorted { order.pairs.contains(Order.Pair($0, $1)) && (!order.pairs.contains(Order.Pair($1, $0)) || $0 < $1) } }
+        let ls = sorted(l), rs = sorted(r)
+        var i = 0, j = 0, comparisons = 0
+        var fact = Fact()
+        while i < ls.count && j < rs.count {
+            comparisons += 1
+            if values[ls[i]] <= values[rs[j]] { fact.insert(Order.Pair(ls[i], rs[j])); i += 1 }
+            else { fact.insert(Order.Pair(rs[j], ls[i])); j += 1 }
+        }
+        return (fact, comparisons)
+    }
+}
+
+extension Order {
+    /// Total on a subset of the indices.
+    public func isTotal(on s: [Int]) -> Bool {
+        for i in s { for j in s where i != j && !pairs.contains(Pair(i, j)) && !pairs.contains(Pair(j, i)) { return false } }
+        return true
+    }
+}
