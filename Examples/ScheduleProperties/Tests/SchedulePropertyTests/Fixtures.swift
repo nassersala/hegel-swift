@@ -16,15 +16,19 @@ actor Account {
     /// Buggy: the balance may change across the `await`.
     func withdraw(_ amount: Int, auditedBy auditor: Auditor) async -> Bool {
         guard balance >= amount else { return false }
+        executor.scheduler.note("check \(balance)")
         await auditor.record("withdraw \(amount)")
         balance -= amount  // may go negative
+        executor.scheduler.note("commit \(balance)")
         return true
     }
 
     /// Fixed: commit before suspending.
     func withdrawSafely(_ amount: Int, auditedBy auditor: Auditor) async -> Bool {
         guard balance >= amount else { return false }
+        executor.scheduler.note("check \(balance)")
         balance -= amount
+        executor.scheduler.note("commit \(balance)")
         await auditor.record("withdraw \(amount)")
         return true
     }

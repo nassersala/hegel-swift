@@ -14,12 +14,12 @@
 /// at the last position; `weakUntil` at the last position is `q ∨ p`;
 /// `prev` and `changed` are false at position 0 (PropRatt rejects `prev` there); every
 /// formula is true on the empty trace.
-public indirect enum Pred<State> {
+public indirect enum Pred<State>: Sendable {
     /// An atom: the state at this position.
-    case now((State) -> Bool)
+    case now(@Sendable (State) -> Bool)
     /// An atom over the preceding and current states, PropRatt's
     /// expression-level `prev` (`prev sig < sig`); false at position 0.
-    case changed((State, State) -> Bool)
+    case changed(@Sendable (State, State) -> Bool)
     case not(Pred)
     case and(Pred, Pred)
     case or(Pred, Pred)
@@ -81,8 +81,8 @@ public func always<State>(_ p: Pred<State>) -> Pred<State> { .always(p) }
 public func next<State>(_ p: Pred<State>) -> Pred<State> { .next(p) }
 public func prev<State>(_ p: Pred<State>) -> Pred<State> { .prev(p) }
 public func weakUntil<State>(_ p: Pred<State>, _ q: Pred<State>) -> Pred<State> { .weakUntil(p, q) }
-public func now<State>(_ atom: @escaping (State) -> Bool) -> Pred<State> { .now(atom) }
-public func changed<State>(_ atom: @escaping (_ previous: State, _ current: State) -> Bool) -> Pred<State> { .changed(atom) }
+public func now<State>(_ atom: @escaping @Sendable (State) -> Bool) -> Pred<State> { .now(atom) }
+public func changed<State>(_ atom: @escaping @Sendable (_ previous: State, _ current: State) -> Bool) -> Pred<State> { .changed(atom) }
 
 /// Checks `formula` at position 0 of `trace`. True on the empty trace.
 public func evaluate<State>(_ formula: Pred<State>, over trace: [State]) -> Bool {

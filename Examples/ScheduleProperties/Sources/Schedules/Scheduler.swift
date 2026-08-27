@@ -54,7 +54,7 @@ public final class Scheduler: @unchecked Sendable {
 
     public init() {}
 
-    /// The trace of the last run: `enqueue`, `run`, and `advance` lines.
+    /// The trace of the last run: `enqueue`, `run`, `timer`, `advance` and `event` lines.
     public var trace: [String] { state.withLock { $0.trace } }
     /// Ready-set width high-water mark of the last run.
     public var maxReadyWidth: Int { state.withLock { $0.maxReadyWidth } }
@@ -84,6 +84,14 @@ public final class Scheduler: @unchecked Sendable {
             s.ready.append(Pending(info: info, job: job, executor: lane))
             s.trace.append("enqueue \(info)")
         }
+    }
+
+    /// Records a semantic event from code under test, in step order, as
+    /// an `event` trace line. Job ids and lanes say which job ran; an
+    /// event says what it did (`check 100`, `commit -100`), which is what
+    /// a property over the trace needs.
+    public func note(_ event: String) {
+        state.withLock { $0.trace.append("event \(event)") }
     }
 
     func sleep(until deadline: Duration, _ continuation: CheckedContinuation<Void, Never>) {
@@ -177,7 +185,7 @@ protocol Lane: AnyObject, Sendable {
 
 public final class ControlledSerialExecutor: SerialExecutor, Lane, @unchecked Sendable {
     public let name: String
-    let scheduler: Scheduler
+    public let scheduler: Scheduler
     init(name: String, scheduler: Scheduler) {
         self.name = name
         self.scheduler = scheduler
@@ -195,7 +203,7 @@ public final class ControlledSerialExecutor: SerialExecutor, Lane, @unchecked Se
 
 public final class ControlledTaskExecutor: TaskExecutor, Lane, @unchecked Sendable {
     public let name: String
-    let scheduler: Scheduler
+    public let scheduler: Scheduler
     init(name: String, scheduler: Scheduler) {
         self.name = name
         self.scheduler = scheduler
@@ -221,7 +229,7 @@ public struct FakeClock: Clock, Sendable {
         public func duration(to other: Instant) -> Duration { other.offset - offset }
         public static func < (a: Instant, b: Instant) -> Bool { a.offset < b.offset }
     }
-    let scheduler: Scheduler
+    public let scheduler: Scheduler
     public var now: Instant { Instant(offset: scheduler.now) }
     public var minimumResolution: Duration { .nanoseconds(1) }
 

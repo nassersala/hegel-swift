@@ -572,7 +572,27 @@ firstFailure(of: clockLaw, over: steps)   // the offending step, for the report
 
 `ticked(lane)` is PropRatt's `✓sigₙ`: the step is the state, so "a job ran on this lane" is an atom. The escape tests state their safety half the same way, `next(weakUntil(!.ticked(.run), .ticked("tasks")))`: after the root step nothing runs until the resumption comes back.
 
-Only safety is testable on a finite trace. There is no `eventually`: a formula that can only be refuted by an infinite trace passes every test and proves nothing. `until` is weak (the right side may never arrive), `next` is true at the last position, `prev` is false at position 0, and `not(eventually p)` is `always(not p)`. The liveness half of the escape tests, "the resumption does come back", stays what it was: `outcome == .completed` within a 2 s grace, a bounded surrogate whose bound is wall time. The fixture's own state (the balance) is not in the trace, so the race is still found by its final state, not by a formula.
+Only safety is testable on a finite trace. There is no `eventually`: a formula that can only be refuted by an infinite trace passes every test and proves nothing. `until` is weak (the right side may never arrive), `next` is true at the last position, `prev` is false at position 0, and `not(eventually p)` is `always(not p)`. The liveness half of the escape tests, "the resumption does come back", stays what it was: `outcome == .completed` within a 2 s grace, a bounded surrogate whose bound is wall time.
+
+Job ids say which job ran; they do not say what it did. Code under test records that with `scheduler.note("commit \(balance)")`, an `event` line in step order, and the race becomes two formulas over the event trace: the damage, `G(✓commit ⇒ balance ≥ 0)`, and the mechanism, no second check between a check and its commit:
+
+```swift
+let atomicity: Pred<Step> = always(.event("check") => next(weakUntil(!.event("check"), .event("commit"))))
+```
+
+The buggy `withdraw` fails both under the one-deviation schedule; `withdrawSafely` holds both under every schedule. The report is the offending step in its context:
+
+```
+minimal schedule: at choice point 2 run ready[0]
+G(✓commit ⇒ balance ≥ 0) fails at step 23
+  run #3@account ready ["tasks"]
+  event check 100
+  run #1@tasks ready ["auditor"]      // the deviation
+  run #5@account ready ["auditor"]
+  event check 100                     // second check sees the full balance
+  ...
+> event commit -100
+```
 
 ## Example: laws that fail for a reason
 

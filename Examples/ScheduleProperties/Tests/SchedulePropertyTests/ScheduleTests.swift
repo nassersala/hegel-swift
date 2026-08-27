@@ -1,4 +1,5 @@
 import Testing
+import Hegel
 import HegelTesting
 import Schedules
 
@@ -11,6 +12,9 @@ import Schedules
         count: 0...8
     ).map(Schedule.init)
 
+    /// `G(✓commit ⇒ balance ≥ 0)`.
+    static let solvent: Pred<Step> = always(.event("commit") => .event("commit", { $0 >= 0 }))
+
     /// The bug is behind the schedule; hegel finds it and the shrunk
     /// schedule is one deviation. Depth-first, the second withdrawal
     /// starts (choice 0), passes its check and hops to the auditor
@@ -19,12 +23,16 @@ import Schedules
     /// checks see the full balance. Earlier deviations do not break it:
     /// starting the first withdrawal at choice 1 just runs it to
     /// completion first.
+    ///
+    /// The property is a formula over the event trace, not the final
+    /// balance: `G(✓commit ⇒ balance ≥ 0)`. The report is the step at
+    /// which it fails, in its context.
     @Test func theRaceShrinksToOneDeviation() throws {
         do {
             try forAll(Self.schedules, seed: 1, database: "") { schedule in
-                let (outcome, balance, trace) = twoWithdrawals(schedule.policy)
+                let (outcome, _, trace) = twoWithdrawals(schedule.policy)
                 guard case .completed = outcome else { throw ScheduleError.didNotComplete(outcome, trace) }
-                if balance < 0 { throw ScheduleError.invariantBroken(balance, trace) }
+                try check("G(✓commit ⇒ balance ≥ 0)", Self.solvent, over: trace)
             }
             Issue.record("the race was not found")
         } catch let failure as PropertyFailure {
@@ -35,7 +43,26 @@ import Schedules
             #expect(minimal.deviations.first?.index == 0)
             let (_, balance, trace) = twoWithdrawals(minimal.policy)
             #expect(balance == -100)
-            print("minimal schedule: \(minimal)\n" + trace.joined(separator: "\n"))
+            #expect(throws: TemporalViolation.self) {
+                try check("G(✓commit ⇒ balance ≥ 0)", Self.solvent, over: trace)
+            }
+            do { try check("G(✓commit ⇒ balance ≥ 0)", Self.solvent, over: trace) } catch { print("minimal schedule: \(minimal)\n\(error)") }
+        }
+    }
+
+    /// The mechanism, not just the damage: between a check and its
+    /// commit no other check runs, `G(✓check ⇒ X(¬✓check W ✓commit))`.
+    /// The buggy fixture fails it on the racing schedule; the fix holds
+    /// it on every schedule. `weakUntil` because a trace that ends
+    /// before the commit is not a violation.
+    @Test func noCheckBetweenCheckAndCommit() throws {
+        let atomicity: Pred<Step> = always(.event("check") => next(weakUntil(!.event("check"), .event("commit"))))
+        let racing = Schedule(deviations: [.init(choice: 2, index: 0)])
+        #expect(throws: TemporalViolation.self) {
+            try check("atomicity", atomicity, over: twoWithdrawals(racing.policy).trace)
+        }
+        try forAll(Self.schedules, database: "") { schedule in
+            try check("atomicity", atomicity, over: twoWithdrawals(schedule.policy, safe: true).trace)
         }
     }
 

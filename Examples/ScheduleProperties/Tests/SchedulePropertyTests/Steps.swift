@@ -5,8 +5,8 @@ import Schedules
 /// PropRatt's tick atoms are atoms over the step's kind and lane. The
 /// fixture's own state (the balance) is not in the trace; formulas here
 /// speak about the scheduler, not the account.
-struct Step: Equatable, CustomStringConvertible {
-    enum Kind: Equatable { case enqueue, run, timer, advance }
+struct Step: Equatable, Sendable, CustomStringConvertible {
+    enum Kind: Equatable, Sendable { case enqueue, run, timer, advance, event }
     var kind: Kind
     var id: Int?
     var lane: String?
@@ -14,7 +14,11 @@ struct Step: Equatable, CustomStringConvertible {
     var ready: [String]
     /// The fake clock after this step.
     var now: Duration
-    var description: String { "\(kind) #\(id.map(String.init) ?? "-")@\(lane ?? "-") ready \(ready) at \(now)" }
+    /// For `event` steps: the words after `event`, e.g. `["commit", "-100"]`.
+    var event: [String] = []
+    var description: String {
+        kind == .event ? "event \(event.joined(separator: " "))" : "\(kind) #\(id.map(String.init) ?? "-")@\(lane ?? "-") ready \(ready) at \(now)"
+    }
 
     /// Parses the scheduler's trace lines. Unknown lines are dropped.
     static func parse(_ trace: [String]) -> [Step] {
@@ -44,6 +48,8 @@ struct Step: Equatable, CustomStringConvertible {
                 let text = line.split(separator: " to ").dropFirst().first.map { $0.split(separator: ",").first.map(String.init) ?? "" } ?? ""
                 now = Duration.parse(text) ?? now
                 steps.append(Step(kind: .advance, id: nil, lane: nil, ready: [], now: now))
+            case "event":
+                steps.append(Step(kind: .event, id: nil, lane: nil, ready: [], now: now, event: words.dropFirst().map(String.init)))
             default:
                 continue
             }
@@ -67,4 +73,28 @@ extension Pred where State == Step {
     static func ticked(_ lane: String) -> Pred { now { $0.kind == .run && $0.lane == lane } }
     /// A step of this kind.
     static func ticked(_ kind: Step.Kind) -> Pred { now { $0.kind == kind } }
+    /// A semantic event with this name; `value` sees its argument.
+    static func event(_ name: String, _ value: @escaping @Sendable (Int) -> Bool = { _ in true }) -> Pred {
+        now { $0.kind == .event && $0.event.first == name && $0.event.dropFirst().first.flatMap { Int($0) }.map(value) ?? false }
+    }
+}
+
+/// A formula failed over a trace: the report is the offending step in
+/// its context, PropRatt's counterexample table as text.
+struct TemporalViolation: Error, CustomStringConvertible {
+    let formula: String
+    let step: Int
+    let steps: [Step]
+    var description: String {
+        let lines = steps.indices.map { "\($0 == step ? ">" : " ") \(steps[$0])" }
+        return "\(formula) fails at step \(step)\n" + lines.joined(separator: "\n")
+    }
+}
+
+/// Checks `formula` at position 0; throws with the first failing step.
+func check(_ name: String, _ formula: Pred<Step>, over trace: [String]) throws {
+    let steps = Step.parse(trace)
+    if let step = firstFailure(of: formula, over: steps) {
+        throw TemporalViolation(formula: name, step: step, steps: steps)
+    }
 }
