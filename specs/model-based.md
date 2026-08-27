@@ -38,6 +38,50 @@ One sentence for the README: invariants say what must never happen; a
 model says what each operation must make happen. (Rules are drivers, not
 assertions.)
 
+## Semantic interpretation (2026-08-27 addendum)
+
+`specs/denotational-design.md` gives the general account: model-based testing
+checks a commuting square or, for nondeterministic systems, an observational
+refinement.
+
+For model states `M`, arguments `A`, observations `O`, and successor states
+`M'`, the abstract meaning of an operation family is a relation:
+
+```text
+T subset M x A x O x M'
+```
+
+The v1 `Operation` API below presents the deterministic special case with
+closures: `model` computes the successor and either `post` or `equal` checks
+the observation. `Operation` is therefore an executable presentation of the
+relation, not the relation's mathematical definition.
+
+The concrete SUT is related to `M` by an observation/abstraction boundary. The
+draft's `consistent:` witness is the operational form of that boundary: it can
+reject an illegal concrete state or report that concrete and abstract
+observations have drifted. Direct equality between a SUT and its model is only
+a special case.
+
+One generated step investigates forward simulation:
+
+1. `args` selects an abstractly permitted operation from the model alone;
+2. `run` executes the concrete operation;
+3. `model` advances the abstract state;
+4. `post`/`equal` checks the operation observation;
+5. `consistent` checks the concrete-to-abstract relation.
+
+A successful finite Hegel run is evidence for refinement, not a proof for all
+programs. A verified artifact may later supply the abstract relation, but the
+mapping from artifact actions and observations to Swift closures remains a
+small trusted test boundary. That adapter belongs to
+`specs/verified-model-artifacts.md`; it is not added to v1 until the experiment
+validates it.
+
+Nondeterministic successor relations are intentionally outside this v1 API.
+Forcing them through a deterministic closure would choose an oracle path too
+early; add them only after a concrete example establishes selection and
+shrinking semantics.
+
 ## Design rules
 
 Same as `specs/laws.md`: one shape, witnesses not protocols, small.
@@ -319,6 +363,29 @@ Validation order per the review — the primitive before the adapter, so
    laws/relations (black), operations against a model — an enumeration
    when finite (state), the code (clear). Plus the one-sentence rule and
    Hughes's second-string guidance, scoped to his benchmark.
+
+## Result (2026-08-27)
+
+Built as specified, one rename: `Operation` collides with
+`Foundation.Operation` in any file that imports Foundation (the door
+consumer did), so the type is `Command<SUT, Model>` and the driver
+parameter is `commands:`. The state is a `Modelled<SUT, Model>` struct
+rather than a labeled tuple so it can print as `sut X, model Y`. Nullary
+steps print as `name()`; argued steps as `name(args)`; observed values as
+`name(args) -> value`. `Rule.describeStep` is public; the runner uses an
+internal label-returning step underneath (`LabeledStepFailure` carries the
+label through a throw). Validation order followed: describeStep, then
+`Command` against a queue in the library tests (popsLast shrinks at seed 1
+to `push(0) push(1) pop() -> Optional(1) failed`; a `clear` that leaves one
+element is caught only by `consistent`), then the ports. The Agda door
+consumer went from a hand-rolled `Harness` + `rules(_:)` to `commands(_:)`
+over the same table, and gained the transported theorem
+(`open-only-when-unlocked` checked in `post`); the planted bug shrinks to
+`open() -> opened failed`. `Examples/DequeProperties` checks
+swift-collections' `Deque<Int>` against `[Int]` with a model-dependent
+`removeAt` (500 cases pass); a planted popFirst-pops-last wrapper shrinks
+to two pushes and a popFirst. Not done: `Enumeration.operations()`,
+`Laws.abstraction`, the AgentProperties port, `Pool` inside `args`.
 
 ## Open questions
 

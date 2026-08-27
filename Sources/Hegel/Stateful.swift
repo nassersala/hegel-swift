@@ -12,16 +12,49 @@ public struct Rule<State>: Sendable {
     /// throw `HegelError.assume` to reject the drawn arguments, any other
     /// error to fail the property.
     public let step: @Sendable (inout State, TestCase) throws -> Void
+    /// What this step is called in the displayed trace, decided after the
+    /// step ran so it can name drawn arguments. `nil` keeps the static name.
+    public let describeStep: (@Sendable (State) -> String)?
+
+    /// The runner's view: performs the step and returns its trace label. A
+    /// failing step throws `LabeledStepFailure` so the label still prints.
+    let labeledStep: @Sendable (inout State, TestCase) throws -> String
 
     public init(
         _ name: String,
         precondition: @escaping @Sendable (State) -> Bool = { _ in true },
+        describeStep: (@Sendable (State) -> String)? = nil,
         step: @escaping @Sendable (inout State, TestCase) throws -> Void
     ) {
         self.name = name
         self.precondition = precondition
         self.step = step
+        self.describeStep = describeStep
+        self.labeledStep = { state, tc in
+            try step(&state, tc)
+            return describeStep?(state) ?? name
+        }
     }
+
+    /// A rule whose step produces its own trace label (used by `Command`).
+    init(
+        labeled name: String,
+        precondition: @escaping @Sendable (State) -> Bool,
+        _ labeledStep: @escaping @Sendable (inout State, TestCase) throws -> String
+    ) {
+        self.name = name
+        self.precondition = precondition
+        self.describeStep = nil
+        self.labeledStep = labeledStep
+        self.step = { state, tc in _ = try labeledStep(&state, tc) }
+    }
+}
+
+/// Thrown by a labeled step that failed after deciding its label; the runner
+/// prints `label failed` and reports `underlying`.
+struct LabeledStepFailure: Error {
+    let label: String
+    let underlying: any Error
 }
 
 /// A named invariant, checked on the initial state and after every rule.
@@ -134,8 +167,9 @@ public func forAll<State>(
                 // state reached through references in State is the rule
                 // author's responsibility, as in Hypothesis.)
                 let snapshot = state
+                let label: String
                 do {
-                    try rule.step(&state, tc)
+                    label = try rule.labeledStep(&state, tc)
                     _ = hegel_stop_span(tc.ctx.raw, tc.raw, false)
                 } catch HegelError.assume {
                     // The rule rejected its drawn arguments: roll back the
@@ -145,12 +179,16 @@ public func forAll<State>(
                     _ = hegel_stop_span(tc.ctx.raw, tc.raw, true)
                     try tc.call(hegel_state_machine_rule_rejected(tc.ctx.raw, tc.raw, sm))
                     continue
+                } catch let failure as LabeledStepFailure {
+                    _ = hegel_stop_span(tc.ctx.raw, tc.raw, true)
+                    steps.append("\(failure.label) failed")
+                    throw failure.underlying
                 } catch {
                     _ = hegel_stop_span(tc.ctx.raw, tc.raw, true)
                     steps.append("\(rule.name) failed")
                     throw error
                 }
-                steps.append(rule.name)
+                steps.append(label)
                 try checkInvariants()
                 observe()
             }

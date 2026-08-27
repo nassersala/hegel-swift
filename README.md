@@ -237,6 +237,42 @@ suite: lens Int → String
 violated: get(set(s, v)) = 0, v =
 ```
 
+## Model-based testing: commands against a model
+
+Invariants say what must never happen; a model says what each operation must make happen. A `Command` draws arguments from the model, runs the real system, advances the model, and compares. Here a ring-buffer queue is checked against `[Int]`:
+
+```swift
+let push = Command<Queue, [Int]>(
+    "push",
+    args:  { _, tc in Int(try tc.drawInteger(in: Int64(-100)...100)) },
+    run:   { q, x in q.push(x) },
+    model: { m, x in m.append(x) })              // effect only
+
+let pop = Command<Queue, [Int]>(
+    "pop",
+    precondition: { !$0.isEmpty },               // on the model, never the SUT
+    run:   { q in q.pop() },
+    model: { m in m.removeFirst() })             // expected result, compared with ==
+
+try forAll(sut: Gen { _ in Queue() }, model: [],
+           commands: [push, pop, clear, count],
+           consistent: { q, m in                 // α: recompute the model from the SUT
+               guard q.elements == m else { throw Drift("\(q.elements) vs \(m)") }
+           })
+```
+
+Arguments and applicability depend only on the model; needing the SUT to decide what is legal means the model is too weak. `consistent` runs on the initial pair and after every step, so drift that no operation observes (a `clear` that leaves one element) is caught at the step that caused it. A planted bug that pops the last element instead of the first shrinks to:
+
+```
+initial: sut Queue([]), model []
+  push(0)
+  push(1)
+  pop() -> Optional(1) failed
+violated: pop: observed Optional(1), model expected Optional(0)
+```
+
+Three initializer forms: explicit `post:` over `(modelBefore, args, observed)`; expected-result, where `model:` returns what the SUT must observe under an `equal:` witness (`==` when `Equatable`); and effect-only, checked by `consistent` and the invariants. `HegelError.assume` in `args:` rejects the draw before the SUT runs; from `run:` or `post:` it is reported as misuse, since a reference-typed SUT may already have changed. Commands lower onto the stateful runner (`command.rule()`); plain `Rule`s gain `describeStep:` for argument-bearing trace labels, and `frequency` gives weighted choice among generators. `specs/model-based.md` has the design and its Hughes/Quviq provenance.
+
 ## Example: properties for a real library
 
 `Examples/AdhanProperties` property-tests [adhan-swift](https://github.com/batoulapps/adhan-swift) (Islamic prayer times): ordering of the five prayers, madhab moving only asr, qibla always a bearing, times belonging to their day. **The first run found a real bug** ([batoulapps/adhan-swift#102](https://github.com/batoulapps/adhan-swift/issues/102)): in the high-latitude band the library can return non-nil, out-of-order times — asr before dhuhr on the same day, or landing days after the requested date. Hegel shrank it to the minimal reproduction `(lat -72, lon 0), 2000-08-01, muslimWorldLeague`. ~1,700 generated cases run in ~13 ms.
@@ -505,6 +541,8 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [x] Async `forAll`/`expectAll`: suspension between draws, caller cancellation propagates, per-invocation `timeout`; blob-identical to the synchronous twin (`specs/async-experiments.md` E0)
 - [x] Laws for swift-async-algorithms `merge`/`zip` on the vendored deterministic validation runtime: generated marble-diagram scripts, per-operator trace-acceptance model, termination-mode law groups, metamorphic translation/swap; `Examples/AsyncProperties` (`specs/async-experiments.md` E1)
 - [x] Schedules as inputs: controlled scheduler on public API, `Schedule` = deviations from depth-first shrinking to a one-line story, byte-stable replay, measured reach (what escapes and what does not); `Examples/ScheduleProperties` (`specs/async-experiments.md` E2a–c)
+- [x] Model-based testing: `Command<SUT, Model>` (args from the model, run, model, post/equal/effect-only forms), `forAll(sut:model:commands:consistent:)`, `Rule.describeStep`, `frequency`; `Examples/DequeProperties` (swift-collections `Deque` vs `[Int]`) and the Agda door consumer both lower onto it (`specs/model-based.md`)
+- [x] Agda-verified finite-model experiment: Agda proves properties of one executable transition function and exports its complete table; Hegel checks a separate Swift implementation against it and shrinks a planted refinement bug to one command; `Examples/AgdaVerifiedModel`
 - [ ] Validate against `hegeldev/hegel-core` (the cross-language protocol suite)
 
 ## References

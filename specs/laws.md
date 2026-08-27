@@ -31,6 +31,31 @@ It is not orthogonal to the rest of the library:
 - Floating point is a non-field and the catalog has to say so in its design
   (an explicit equality witness), not hide it behind an epsilon.
 
+## Semantic interpretation (2026-08-27 addendum)
+
+This implemented layer is an executable representation of mathematical
+propositions; it is not the source of their meaning. See
+`specs/denotational-design.md` for the common vocabulary.
+
+- An algebraic structure is a carrier with operations and equations. A
+  semigroup, monoid, group, lattice, retraction, or lens has its usual
+  mathematical denotation independently of `Law`, `LawSuite`, and the runner.
+- A `Law` denotes a named equation, implication, or relation under an explicit
+  observation/equality witness. Its `Gen` and throwing closure are the search
+  interpretation used to seek a finite refutation.
+- A `LawSuite` denotes the conjunction of its named laws. Running each law
+  separately is a reporting/search decision; it does not change the
+  conjunction's truth conditions.
+- `equal:` defines observational equivalence for the property. It is not merely
+  a comparison implementation detail, particularly for floating point,
+  abstract representations, and cross-model conformance.
+- A passing randomized suite is finite evidence. A failing suite supplies a
+  witness refuting the corresponding proposition over the generated domain.
+
+The subject-first autocomplete facade discussed in
+`specs/syntax-and-discovery.md` may lower to this implemented representation.
+It must not create a second catalog or execution semantics.
+
 ## Design rules
 
 1. **One shape.** A law is a name, a generator, and a check that throws.

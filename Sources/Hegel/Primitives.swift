@@ -61,6 +61,24 @@ public func oneOf<A>(_ gens: [Gen<A>]) -> Gen<A> {
     }
 }
 
+/// Weighted choice among generators. Weights are search guidance: they say
+/// where the engine spends effort, not that drawn values follow the ratio
+/// (libhegel biases, mutates and reuses draws). Shrinks toward the first
+/// generator, like `oneOf`. Weights must be positive.
+public func frequency<A>(_ weighted: [(weight: Int, gen: Gen<A>)]) -> Gen<A> {
+    precondition(!weighted.isEmpty, "frequency requires at least one generator")
+    precondition(weighted.allSatisfy { $0.weight > 0 }, "frequency weights must be positive")
+    let total = weighted.reduce(0) { $0 + $1.weight }
+    return Gen { tc in
+        var roll = Int(try tc.drawInteger(in: 0...Int64(total - 1)))
+        for (weight, gen) in weighted {
+            if roll < weight { return try gen.run(tc) }
+            roll -= weight
+        }
+        return try weighted[weighted.count - 1].gen.run(tc)
+    }
+}
+
 /// Picks one of the given constants.
 public func element<A: Sendable>(of values: [A]) -> Gen<A> {
     precondition(!values.isEmpty, "element(of:) requires at least one value")

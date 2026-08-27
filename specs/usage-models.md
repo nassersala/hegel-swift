@@ -30,6 +30,40 @@ Three of the five ideas are worth taking; this spec says which and how.
 Not taken: team review process, no-unit-tests-by-developers, a separate
 certification team, incremental planning by usage probability.
 
+## Semantic interpretation (2026-08-27 addendum)
+
+An operational usage profile has probability as part of its mathematical
+meaning. For usage states `U`, it is a Markov kernel assigning a probability
+distribution over permitted labeled transitions and successor states:
+
+```text
+K : U -> Distribution(Transition x U)
+```
+
+Integer weights are a finite representation of that kernel after
+normalization. The same weights have two different interpretations in this
+spec's two drivers:
+
+- the representative driver samples the kernel and may support qualified
+  statistical claims under its stated independence and stopping assumptions;
+- the Hegel driver uses the transition support and weights as adversarial
+  search guidance, with shrinking, mutation, reuse, boundary bias, and
+  targeting. Its empirical frequencies are not the operational profile.
+
+Thus `frequency` does not acquire probability semantics merely because a usage
+model calls it. The `UsageModel` value carries the intended kernel; the driver
+determines whether a run is a representative interpretation or a search
+interpretation. See `specs/generator-semantics.md`.
+
+The state-transition meaning is shared with `specs/model-based.md`: a usage
+model adds an operational profile over permitted transitions, while an
+`Operation` supplies the abstract/concrete refinement check. The unresolved
+draw-source integration must not be solved by weakening this distinction.
+
+`Rule.postcondition` below was superseded by `Operation.post` in
+`specs/model-based.md`; retain it here as draft history, but do not implement it
+as a parallel API.
+
 ## What hegel has and does not have
 
 Has: stateful testing — `Rule<State>` (`name`, `precondition`, `step:
@@ -129,8 +163,9 @@ public struct UsageModel<Usage: Hashable & Sendable, State>: Sendable {
     public let terminal: Set<Usage>      // walks end here (Cleanroom's "exit")
 
     /// The model as a single hegel rule over (usage, state): the step draws
-    /// the next transition by `frequency` from the current usage state's
-    /// row. With the engine picking among one rule, the profile is real.
+    /// the next transition from the current usage state's weighted row.
+    /// Under hegel this is an adversarial search interpretation, not a
+    /// representative sample of the profile.
     public func rule() -> Rule<(usage: Usage, state: State)>
 }
 ```

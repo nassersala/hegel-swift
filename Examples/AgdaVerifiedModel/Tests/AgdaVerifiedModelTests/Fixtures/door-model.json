@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "model": "VerifiedDoor",
+  "source": "Agda/DoorModel.agda",
+  "initial": "locked",
+  "proofs": ["open-only-when-unlocked", "locking-leaves-locked"],
+  "transitions": [
+    {"state":"locked","command":"lock","next":"locked","observation":"ok"},
+    {"state":"locked","command":"unlock","next":"unlocked","observation":"ok"},
+    {"state":"locked","command":"open","next":"locked","observation":"denied"},
+    {"state":"unlocked","command":"lock","next":"locked","observation":"ok"},
+    {"state":"unlocked","command":"unlock","next":"unlocked","observation":"ok"},
+    {"state":"unlocked","command":"open","next":"unlocked","observation":"opened"}
+  ]
+}

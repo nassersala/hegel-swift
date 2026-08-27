@@ -38,6 +38,10 @@ jobs:
         run: swift test --package-path Examples/AsyncProperties
       - name: Test example (ScheduleProperties)
         run: swift test --package-path Examples/ScheduleProperties
+      - name: Test example (DequeProperties)
+        run: swift test --package-path Examples/DequeProperties
+      - name: Test example (AgdaVerifiedModel)
+        run: swift test --package-path Examples/AgdaVerifiedModel
       - name: Test AffordanceProperties on iOS simulator
         working-directory: Examples/AffordanceProperties
         run: |
