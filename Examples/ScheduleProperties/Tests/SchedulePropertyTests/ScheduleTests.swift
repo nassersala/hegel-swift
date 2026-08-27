@@ -46,7 +46,13 @@ import Schedules
             #expect(throws: TemporalViolation.self) {
                 try check("G(✓commit ⇒ balance ≥ 0)", Self.solvent, over: trace)
             }
-            do { try check("G(✓commit ⇒ balance ≥ 0)", Self.solvent, over: trace) } catch { print("minimal schedule: \(minimal)\n\(error)") }
+            let minimality = Minimality(minimal) { policy in
+                let (scheduler, _, _) = twoWithdrawalsRun(policy)
+                return (scheduler, scheduler.trace)
+            }
+            #expect(minimality.consumed == 1)
+            #expect(minimality.isRepresentative)
+            do { try check("G(✓commit ⇒ balance ≥ 0)", Self.solvent, over: trace) } catch { print("minimal schedule: \(minimal)\n\(minimality)\n\(error)") }
         }
     }
 

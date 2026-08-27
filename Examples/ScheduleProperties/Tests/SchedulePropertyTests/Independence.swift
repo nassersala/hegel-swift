@@ -83,3 +83,29 @@ func threeAccounts(_ policy: @escaping Scheduler.Policy) -> (Scheduler.Outcome, 
             != Independence.normalForm(twoWithdrawals(Schedule().policy).trace))
     }
 }
+
+/// What the shrunk schedule's minimality is, in the spec's words
+/// (`concurrency-semantics.md`, Schedule generation and Semantic
+/// shrinking): generated vs consumed deviations, and whether the failing
+/// event trace is its class representative. Operational minimality is
+/// what hegel's shrinker achieves; causal minimality is not claimed.
+struct Minimality: CustomStringConvertible {
+    let generated: Int
+    let consumed: Int
+    let choicePoints: Int
+    let isRepresentative: Bool
+
+    init(_ schedule: Schedule, run: (@escaping Scheduler.Policy) -> (Scheduler, trace: [String])) {
+        let (scheduler, trace) = run(schedule.policy)
+        generated = schedule.deviations.count
+        choicePoints = scheduler.choicePoints
+        consumed = schedule.deviations.filter { $0.choice < scheduler.choicePoints }.count
+        let events = Step.parse(trace).filter { $0.kind == .event }
+        isRepresentative = events == Independence.normalForm(trace)
+    }
+
+    var description: String {
+        "minimality: operational (fewest deviations); \(consumed) of \(generated) deviations consumed over \(choicePoints) choice points; "
+            + (isRepresentative ? "event trace is its class representative" : "event trace is not in normal form")
+    }
+}

@@ -49,6 +49,11 @@ actor Auditor {
 /// Returns the outcome, the final balance (negative = invariant broken)
 /// and the trace.
 func twoWithdrawals(_ policy: @escaping Scheduler.Policy, safe: Bool = false) -> (Scheduler.Outcome, balance: Int, trace: [String]) {
+    let (scheduler, outcome, balance) = twoWithdrawalsRun(policy, safe: safe)
+    return (outcome, balance, scheduler.trace)
+}
+
+func twoWithdrawalsRun(_ policy: @escaping Scheduler.Policy, safe: Bool = false) -> (Scheduler, Scheduler.Outcome, balance: Int) {
     let scheduler = Scheduler()
     let account = Account(balance: 100, executor: scheduler.serialExecutor("account"))
     let auditor = Auditor(executor: scheduler.serialExecutor("auditor"))
@@ -59,7 +64,7 @@ func twoWithdrawals(_ policy: @escaping Scheduler.Policy, safe: Bool = false) ->
         _ = await (a, b)
         result.value = await account.balance
     }
-    return (outcome, result.value, scheduler.trace)
+    return (scheduler, outcome, result.value)
 }
 
 final class SendableBox<T>: @unchecked Sendable {
