@@ -9,10 +9,10 @@ import Testing
 /// Runs a suite expected to fail; returns the counterexamples, one per
 /// violated law, in report order.
 private func counterexamples(
-    _ suite: LawSuite, testCases: UInt64 = 300, fileID: String = #fileID, line: Int = #line
+    _ suite: LawSuite, testCases: UInt64 = 300, seed: UInt64? = nil, fileID: String = #fileID, line: Int = #line
 ) throws -> [String] {
     do {
-        try forAll(suite, testCases: testCases, database: "")
+        try forAll(suite, testCases: testCases, seed: seed, database: "")
     } catch let failure as PropertyFailure {
         return try failure.failures.map { try #require($0.counterexample) }
     }
@@ -164,8 +164,12 @@ private func counterexamples(
         // Default batch: the engine's bias finds it, not always in both laws.
         let byDefault = try counterexamples(Laws.hashable(memos))
         #expect(!byDefault.isEmpty)
-        // Equivalence classes: both laws, the minimal class.
-        let found = try counterexamples(Laws.hashable(memos, equivalents: classes))
+        // Equivalence classes: both laws, the minimal class. Seeded, and CI
+        // sets SWIFT_DETERMINISTIC_HASHING: the Set-counts law only shows
+        // when the two ==-equal memos hash to different buckets, and Hasher
+        // is seeded per process, so an unlucky process misses it (seen
+        // about one run in twenty before this).
+        let found = try counterexamples(Laws.hashable(memos, equivalents: classes), seed: 2)
         #expect(found.count == 2)
         #expect(found.contains {
             $0.contains("law: a == b ⇒ hash(a) == hash(b)\n  [HegelTests.LawsTests.Memo(key: 0, cache: 0), HegelTests.LawsTests.Memo(key: 0, cache: 1)]")

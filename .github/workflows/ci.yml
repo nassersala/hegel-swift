@@ -20,7 +20,10 @@ jobs:
         run: swift --version && xcodebuild -version
       - name: Test Hegel
         # libhegel detects CI (GITHUB_ACTIONS): the example database is
-        # auto-disabled and runs derandomize by default.
+        # auto-disabled and runs derandomize by default. Hasher is seeded
+        # per process; Laws.hashable's Set-counts law depends on it.
+        env:
+          SWIFT_DETERMINISTIC_HASHING: 1
         run: swift test
       - name: Test example (AdhanProperties)
         run: swift test --package-path Examples/AdhanProperties
