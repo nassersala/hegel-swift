@@ -324,6 +324,29 @@ let commands: [Command<LoginScreen, Model>] = Stimulus.allCases.map { s in
 
 The Swift screen inherits the theorems it refines: a screen whose resend resets the counter violates `resend_keeps_attempts`, and with `consistent:` comparing the counter it shrinks to three steps. Lean also rejected the first draft of the invariant, and α found a counter-after-sign-in discrepancy no response reveals. The same example carries the account race from `Examples/ScheduleProperties` as a Lean *relation* (`Lean/Bank`): the schedule is the drawn input, the run yields a trace of semantic events, and every event must be enabled in the relation where it fires. Lean proves every safe path keeps the balance non-negative; Hegel shows the safe actor refines that relation under 300 schedules, that the unsafe actor refines the *unsafe* relation (the race is a behaviour the model admits, not a refinement failure), and shrinks the race to one deviation with its event trace. Both examples need their prover only to regenerate; the Agda table is checked in, the Lean one is built in CI.
 
+## Spelling: the named form before the blank closure
+
+The research on why people find property-based testing hard (Hughes, *How to Specify It!*; Goldstein et al., ICSE 2024) says the same thing: writing `forAll(gen) { x in ... }` is easy, filling the closure is not, and people succeed when the property has a name they already know. So the library's named forms come first, and autocomplete is where a user meets them. Subject first, then the word, then the domain:
+
+```swift
+try forAll(sorted, is: .idempotent, on: .array(of: .int(in: 0...9)))
+try forAll(reversed, is: .involution, on: .array(of: .int(in: 0...9)))
+try forAll(+, is: .associative, on: .int(in: -100...100))
+try forAll(max, Int.min, are: .semilattice, on: .int(in: -100...100))
+try forAll(encode, decode, are: .retraction, on: .users)
+```
+
+Each of these is a thin spelling over `Laws.*`; the catalog stays the source of truth and the failure display is the catalog's. A metamorphic relation whose follow-up is "bump one field" is a key path:
+
+```swift
+.monotone("fajr angle up", bumping: \.params.fajrAngle, by: .int(in: 1...6), observing: \.fajr, .nonIncreasing)
+.invariant("longitude period", shifting: \.longitude, by: .constant(360))
+```
+
+Underneath: `tc.draw(gen)` builds dependent generators top-down without nested `flatMap`; every combinator has a leading-dot spelling (`.array(of:)`, `.oneOf`, `.element(of:)`, `.frequency`, `.constant`) so it works in argument position; an integer range stands where a generator is expected (`forAll(1...100) { n in ... }`); and `zip` takes any number of generators. One measured limit: through the parameter-pack `zip` the compiler no longer infers element types backwards from `.map(User.init)`, so the fixed-arity forms stay for two to four generators, where that inference is what makes `.int(in: 18...65)` an `Int` because `User.age` is.
+
+Not done on purpose: result builders, macros, literal conformances on `Gen` (an array literal could mean a value list or equal-weight alternatives), and operators beyond `+` on suites.
+
 ## Example: properties for a real library
 
 `Examples/AdhanProperties` property-tests [adhan-swift](https://github.com/batoulapps/adhan-swift) (Islamic prayer times): ordering of the five prayers, madhab moving only asr, qibla always a bearing, times belonging to their day. **The first run found a real bug** ([batoulapps/adhan-swift#102](https://github.com/batoulapps/adhan-swift/issues/102)): in the high-latitude band the library can return non-nil, out-of-order times — asr before dhuhr on the same day, or landing days after the requested date. Hegel shrank it to the minimal reproduction `(lat -72, lon 0), 2000-08-01, muslimWorldLeague`. ~1,700 generated cases run in ~13 ms.
@@ -596,6 +619,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [x] Enumeration: `Enumeration<State, Stimulus, Response>` from an exhaustive `switch` (compiler-checked) or blocks (`problems()`-checked); `walk`, `commands(run:)`; OTP login in the library tests, the Agda door consumer loads its JSON into it
 - [x] Lean-verified model with a counter, consumed as an evaluator: `lake build` to C, linked into the test, `Command` calls the proved `step`; the login screen on the simulator with affordances checked against Lean's `enabled`; the account race against a Lean relation with `safe_paths_nonneg` proved and the race shrunk to one deviation; `Examples/LeanVerifiedModel`
 - [x] Agda-verified finite-model experiment: Agda proves properties of one executable transition function and exports its complete table; Hegel checks a separate Swift implementation against it and shrinks a planted refinement bug to one command; `Examples/AgdaVerifiedModel`
+- [x] Spelling: subject-first laws (`forAll(f, is: .idempotent, on:)`), key-path relations, `tc.draw`, leading-dot combinators, ranges as generators, any-arity `zip` (fixed 2–4 kept for backward inference)
 - [ ] Validate against `hegeldev/hegel-core` (the cross-language protocol suite)
 
 ## References

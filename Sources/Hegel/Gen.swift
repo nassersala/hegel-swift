@@ -51,6 +51,12 @@ extension Gen {
 /// A tuple of generators becomes a generator of tuples — how tuples (and,
 /// via `.map(Struct.init)`, your domain types) get generation without any
 /// conformance machinery.
+///
+/// Fixed arities 2–4 exist alongside the parameter-pack form below because
+/// they let the compiler infer element types backwards from `.map(T.init)`
+/// (`.int(in: 0...120)` becomes `Int` because `User.age` is); through a
+/// pack that inference does not happen. Five or more generators use the
+/// pack; spell the element types when the compiler asks.
 public func zip<A, B>(_ a: Gen<A>, _ b: Gen<B>) -> Gen<(A, B)> {
     Gen { tc in (try a.run(tc), try b.run(tc)) }
 }
@@ -63,4 +69,9 @@ public func zip<A, B, C, D>(
     _ a: Gen<A>, _ b: Gen<B>, _ c: Gen<C>, _ d: Gen<D>
 ) -> Gen<(A, B, C, D)> {
     Gen { tc in (try a.run(tc), try b.run(tc), try c.run(tc), try d.run(tc)) }
+}
+
+/// Any arity.
+public func zip<each G>(_ gen: repeat Gen<each G>) -> Gen<(repeat each G)> {
+    Gen { tc in (repeat try (each gen).run(tc)) }
 }
