@@ -634,7 +634,11 @@ Refinement is the property only hegel can check. A Hoare-partition recursive qui
 excludePivot: [0, 0] → drop ⟨0, -1⟩
 ```
 
-The first bad step is a range the relation never produced, found before the sort is even wrong. A nondeterministic model chooses its successor by drawing it — `concurrency-semantics.md` asks how; this is the answer — and a deterministic implementation refines it by being one of its behaviours.
+The first bad step is a range the relation never produced, found before the sort is even wrong.
+
+Recursion is one implementation, not the algorithm. `worklistQuicksort` keeps `U` as a list and takes any range `pick` names: with the default depth-first pick its steps are the recursive quicksort's exactly, and with a drawn pick it produces behaviours the recursion never does. Both refine the same relation; that is the sense in which the recursive version's behaviours are a subset of the relation's.
+
+A nondeterministic model chooses its successor by drawing it — `concurrency-semantics.md` asks how; this is the answer — and a deterministic implementation refines it by being one of its behaviours.
 
 ## Example: laws that fail for a reason
 

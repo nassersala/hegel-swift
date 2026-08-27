@@ -28,6 +28,29 @@ import Quicksort
         }
     }
 
+    /// The worklist quicksort, its range chosen by a draw, refines the
+    /// same relation; and its behaviours are not the recursion's: over
+    /// drawn arrays of length ≥ 4 some drawn pick order differs from the
+    /// recursive step sequence.
+    @Test func worklistQuicksortRefinesTheRelationInAnyOrder() throws {
+        var differed = false
+        try forAll(Self.arrays, testCases: 300, database: "") { a, tc in
+            let (sorted, steps) = try worklistQuicksort(a) { ranges in
+                Int(try tc.drawInteger(in: 0...Int64(ranges.count - 1)))
+            }
+            let (violation, final) = Lamport.refines(steps, from: a)
+            if let violation { throw NotAStep(violation) }
+            #expect(final.done)
+            #expect(sorted == a.sorted())
+            if steps != quicksort(a).steps { differed = true }
+        }
+        #expect(differed)
+        // Depth-first pick: the recursion's behaviour exactly.
+        let sample = [3, 1, 4, 1, 5, 9, 2, 6]
+        let depthFirst = try worklistQuicksort(sample).steps
+        #expect(depthFirst == quicksort(sample).steps)
+    }
+
     /// The Lomuto split on a Hoare partition: the first bad step is a
     /// `drop` of an empty or reversed range, or a partition of a range the
     /// relation never produced. It shrinks to two elements.

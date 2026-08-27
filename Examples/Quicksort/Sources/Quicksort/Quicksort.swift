@@ -42,3 +42,38 @@ public func quicksort(_ input: [Int], bug: Bug = .none) -> (sorted: [Int], steps
     if !a.isEmpty { sort(0, a.count - 1) }
     return (a, steps)
 }
+
+/// The non-recursive quicksort Lamport says almost no one can write in ten
+/// minutes: `U` as a worklist. `pick` decides which range to take; the
+/// default takes the last (depth-first, the recursive order), and a
+/// drawn `pick` takes any, so the worklist reaches behaviours the
+/// recursion never does. Same relation either way.
+public func worklistQuicksort(
+    _ input: [Int],
+    pick: (_ ranges: [Lamport.Range]) throws -> Int = { $0.count - 1 }
+) rethrows -> (sorted: [Int], steps: [Lamport.Step]) {
+    var a = input
+    var steps: [Lamport.Step] = []
+    var u: [Lamport.Range] = a.isEmpty ? [] : [Lamport.Range(0, a.count - 1)]
+
+    while !u.isEmpty {
+        let r = u.remove(at: try pick(u))
+        if r.b == r.t {
+            steps.append(.drop(r))
+            continue
+        }
+        let pivot = a[(r.b + r.t) / 2]
+        var i = r.b - 1, j = r.t + 1
+        let p: Int
+        while true {
+            repeat { i += 1 } while a[i] < pivot
+            repeat { j -= 1 } while a[j] > pivot
+            if i >= j { p = j; break }
+            a.swapAt(i, j)
+        }
+        steps.append(.partition(r, p: p, after: a))
+        u.append(Lamport.Range(p + 1, r.t))
+        u.append(Lamport.Range(r.b, p))  // last, so the depth-first pick takes the left child first, as the recursion does
+    }
+    return (a, steps)
+}
