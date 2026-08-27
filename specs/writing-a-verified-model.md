@@ -19,7 +19,11 @@ model; Hegel checks it, as finite evidence, for the Swift code.
 Write the state as the smallest structure that decides the future. A counter
 is a `Nat`, not three states named `oneBad`, `twoBad`, `locked`; the
 enumeration form (`Enumeration`, Swift side) is for when you have already
-made that decision and the states are finite.
+made that decision and the states are finite. Elliott's three steps are the
+same: the essential nature of the thing (his stack computation is
+`∀z. (a, z) → (b, z)`, the invariant "stack preserved" stated as a type),
+an analogy with something known written as homomorphism equations, then
+solve. The prover solves; Hegel checks a solution.
 
 ```lean
 structure S where
@@ -107,5 +111,6 @@ The artifacts spec has the full lists; repeat them wherever the word appears.
 ## References
 
 - Conal Elliott, *Denotational Design with Type Class Morphisms*, 2009.
+- Conal Elliott, *Calculating Compilers Categorically*, talk, Haskell Love 2020; *The Simple Essence of Automatic Differentiation*, ICFP 2018.
 - C. A. R. Hoare, *Proof of correctness of data representations*, 1972.
 - `Examples/LeanVerifiedModel/Lean/Otp/Model.lean`, `Lean/Bank/Model.lean`.

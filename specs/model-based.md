@@ -403,7 +403,16 @@ per stimulus whose `precondition:`/`model:` call the C. Lean rejected the
 naive invariant; α found a counter-after-sign-in mismatch no response
 shows; resend bug shrinks to 5 steps by observation, 3 with α. The
 verified-model lane therefore works past finite tables; the evaluator
-mode, not the table, is the one to spec. Not done: `Laws.abstraction`, the
+mode, not the table, is the one to spec. `Laws.abstraction` is dropped
+(2026-08-27): the pure form is the stateful runner with a stack as the
+state — `SUT = [T]`, `Model = [M]`, one `Command` per operation with the
+arity as precondition, `consistent` = ⟦·⟧ per slot — which draws programs
+rather than representations and so respects the image-of-⟦·⟧ premise the
+`Gen<T>` form violates. Elliott's *Calculating Compilers Categorically*
+derives the stack from `first (first f) = lassoc ∘ first f ∘ rassoc`; here
+it is just the state. Example: `Tests/HegelTests/DenotationalTests.swift`
+(sparse vector vs `[Int: Int]`, left-biased merge shrinks to
+`push, dup, add`). Not done: the
 AgentProperties port (its cells also count fired effects, which needs the
 explicit-post form; not cleaner yet), `Pool` inside `args`.
 

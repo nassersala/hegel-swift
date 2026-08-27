@@ -51,6 +51,15 @@ propositions; it is not the source of their meaning. See
   abstract representations, and cross-model conformance.
 - A passing randomized suite is finite evidence. A failing suite supplies a
   witness refuting the corresponding proposition over the generated domain.
+- Draw meanings or programs, not representations. A homomorphism law
+  `⟦op(x)⟧ = op(⟦x⟧)` holds only for `x` in the image of the representation
+  (Elliott 2018 keeps `D` abstract for exactly this reason). A generator of
+  arbitrary representation values tests a stronger claim that may be false
+  when no program can build the value. Build the generator as
+  `meaningGen.map(represent)`, or let the model-based runner draw the
+  program: the stack form in `Tests/HegelTests/DenotationalTests.swift`.
+  This is why there is no `Laws.abstraction` over a `Gen<T>`; see
+  `specs/model-based.md`, "Result".
 
 The subject-first autocomplete facade discussed in
 `specs/syntax-and-discovery.md` may lower to this implemented representation.

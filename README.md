@@ -273,6 +273,43 @@ violated: pop: observed Optional(1), model expected Optional(0)
 
 Three initializer forms: explicit `post:` over `(modelBefore, args, observed)`; expected-result, where `model:` returns what the SUT must observe under an `equal:` witness (`==` when `Equatable`); and effect-only, checked by `consistent` and the invariants. `HegelError.assume` in `args:` rejects the draw before the SUT runs; from `run:` or `post:` it is reported as misuse, since a reference-typed SUT may already have changed. Commands lower onto the stateful runner (`command.rule()`); plain `Rule`s gain `describeStep:` for argument-bearing trace labels, and `frequency` gives weighted choice among generators. `specs/model-based.md` has the design and its Hughes/Quviq provenance.
 
+### Values with a meaning: the stack is the state
+
+The same runner tests a value type against its meaning. Say what the type *is* as a simpler type, write each operation twice, and make the state a stack of each, so a linear command sequence builds terms of any shape. A sparse vector, sorted `(index, value)` pairs, means `[Int: Int]`:
+
+```swift
+let push = Command<[SparseVector], [[Int: Int]]>(
+    "push",
+    args:  { _, tc in (Int(try tc.drawInteger(in: 0...2)), Int(try tc.drawInteger(in: -3...3))) },
+    run:   { s, iv in s.append(.unit(iv.0, iv.1)) },
+    model: { m, iv in m.append(iv.1 == 0 ? [:] : [iv.0: iv.1]) })
+
+let add = Command<[SparseVector], [[Int: Int]]>(
+    "add",
+    precondition: { $0.count >= 2 },                       // the arity
+    run:   { s in let b = s.removeLast(), a = s.removeLast(); s.append(a.adding(b)) },
+    model: { m in let b = m.removeLast(), a = m.removeLast(); m.append(a.merging(b, uniquingKeysWith: +)) })
+
+try forAll(sut: Gen { _ in [SparseVector]() }, model: [[Int: Int]](),
+           commands: [push, add, scale, dup],
+           consistent: { s, m in                           // ⟦·⟧ on every slot
+               for (v, d) in zip(s, m) where v.meaning != d { throw Drift("⟦\(v)⟧ = \(v.meaning) vs \(d)") }
+           })
+```
+
+A merge that keeps the left value where the meaning sums shrinks to one leaf:
+
+```
+initial: sut [], model []
+  push(0, 1)
+  dup
+  add
+  invariant consistent failed
+violated: ⟦SparseVector(0:1)⟧ = [0: 1] vs meaning [0: 2]
+```
+
+This is the whole of denotational design as a test: the meaning is chosen first, the representation must be a homomorphism of it, and the counterexample is the failure that tells you which one is wrong. Draw programs, not representations — a generator of arbitrary `SparseVector`s would test values no program can build. There is no separate `Laws.abstraction`; `Tests/HegelTests/DenotationalTests.swift` is the example.
+
 ## Enumeration: the table is the model
 
 When the states are finite, the model is a table: every canonical state crossed with every stimulus, each cell a response and a next state (Mills's sequence-based enumeration, the Cleanroom "state box"). Written as an exhaustive `switch`, the compiler is the completeness check: delete a cell and it does not compile.
@@ -620,6 +657,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [x] Lean-verified model with a counter, consumed as an evaluator: `lake build` to C, linked into the test, `Command` calls the proved `step`; the login screen on the simulator with affordances checked against Lean's `enabled`; the account race against a Lean relation with `safe_paths_nonneg` proved and the race shrunk to one deviation; `Examples/LeanVerifiedModel`
 - [x] Agda-verified finite-model experiment: Agda proves properties of one executable transition function and exports its complete table; Hegel checks a separate Swift implementation against it and shrinks a planted refinement bug to one command; `Examples/AgdaVerifiedModel`
 - [x] Spelling: subject-first laws (`forAll(f, is: .idempotent, on:)`), key-path relations, `tc.draw`, leading-dot combinators, ranges as generators, any-arity `zip` (fixed 2–4 kept for backward inference)
+- [x] Denotational design as model-based testing: value types against their meaning with a stack as the state, so linear command sequences build arbitrary terms; Elliott's left-biased `Map` merge shrinks to `push, dup, add` (`Tests/HegelTests/DenotationalTests.swift`); no `Laws.abstraction`
 - [ ] Validate against `hegeldev/hegel-core` (the cross-language protocol suite)
 
 ## References
