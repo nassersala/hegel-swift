@@ -596,6 +596,19 @@ G(✓commit ⇒ balance ≥ 0) fails at step 23
 
 Events also make schedule equivalence concrete. Two events on different accounts are independent; adjacent independent events may be swapped; a trace's normal form is the result of swapping into account order until nothing moves (Mazurkiewicz traces). One withdrawal on each of three accounts: 100 drawn schedules give 17 distinct traces and one equivalence class, and every schedule's normal form equals the default schedule's. Two withdrawals on one account are dependent (their `check`/`commit` values depend on the order), so the racing and the depth-first schedule stay different classes; the relation does not erase the bug. The independence relation lives in the example (`Independence.swift`), not in the scheduler: what commutes is a fact about the subject.
 
+With a relation, the report can drop what is independent of the failure. A withdrawal and a transfer racing on A, the transfer's credit landing on B, an unrelated withdrawal on C: the shrunk schedule replays the whole run, and the explanation is the causal cone of the violating event in normal form:
+
+```
+minimal schedule: at choice point 0 run ready[0]; at choice point 2 run ready[0]
+causal cone (3 independent events dropped):
+  event A check 100
+  event A check 100
+  event A commit 0
+  event A commit -100
+```
+
+This is presentation over the shrinker's result, not a stronger shrink: minimality is still "fewest deviations", and the dropped events are still in the trace that reproduces the failure.
+
 The same relation, model-checked: `Examples/ScheduleProperties/TLA/Bank.tla` is the bank as a TLA+ spec (the LTS of `Examples/LeanVerifiedModel/Lean/Bank/Model.lean`), and TLC finds the unsafe counterexample in 5 states — `checkPass a, checkPass b, commit a, commit b` — the same abstract trace as the Lean witness and as hegel's shrunk event trace. It also checks what a finite test cannot: both variants terminate under weak fairness, and neither deadlocks. `TLA/run.sh` runs the unsafe and safe configurations.
 
 ## Example: laws that fail for a reason

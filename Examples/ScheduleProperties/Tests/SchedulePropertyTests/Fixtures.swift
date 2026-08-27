@@ -26,6 +26,24 @@ actor Account {
         return true
     }
 
+    /// Buggy the same way, across two accounts: check here, suspend,
+    /// then debit here and credit there. Races with `withdraw` on this
+    /// account; independent of everything on other accounts.
+    func transfer(_ amount: Int, to other: Account, auditedBy auditor: Auditor) async -> Bool {
+        guard balance >= amount else { return false }
+        executor.scheduler.note("\(name) check \(balance)")
+        await auditor.record("transfer \(amount)")
+        balance -= amount
+        executor.scheduler.note("\(name) commit \(balance)")
+        await other.credit(amount)
+        return true
+    }
+
+    func credit(_ amount: Int) {
+        balance += amount
+        executor.scheduler.note("\(name) credit \(balance)")
+    }
+
     /// Fixed: commit before suspending.
     func withdrawSafely(_ amount: Int, auditedBy auditor: Auditor) async -> Bool {
         guard balance >= amount else { return false }

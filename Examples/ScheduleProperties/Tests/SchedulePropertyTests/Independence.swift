@@ -22,8 +22,10 @@ enum Independence {
     }
 
     /// Lexicographic normal form of the event steps of a trace.
-    static func normalForm(_ trace: [String]) -> [Step] {
-        var events = Step.parse(trace).filter { $0.kind == .event }
+    static func normalForm(_ trace: [String]) -> [Step] { normalForm(events: Step.parse(trace).filter { $0.kind == .event }) }
+
+    static func normalForm(events: [Step]) -> [Step] {
+        var events = events
         var swapped = true
         while swapped {
             swapped = false
@@ -33,6 +35,79 @@ enum Independence {
             }
         }
         return events
+    }
+
+    /// Semantic shrinking, layer 5, as a post-pass on the report: the
+    /// events that are dependent on the violating one (here: the same
+    /// subject; the relation is subject-based, so the closure is one
+    /// step). Everything else is outside the causal cone and is dropped
+    /// from the explanation, not from the replayed trace.
+    static func causalCone(of violation: Step, in events: [Step]) -> [Step] {
+        events.filter { !independent($0, violation) }
+    }
+}
+
+/// The failing event trace explained: its causal cone in normal form,
+/// with the count of independent events left out. Operational
+/// minimality stays what the shrinker achieved; this is presentation.
+struct Explanation: CustomStringConvertible {
+    let cone: [Step]
+    let dropped: Int
+    init(violation: TemporalViolation) {
+        let events = violation.steps.filter { $0.kind == .event }
+        let cone = Independence.causalCone(of: violation.steps[violation.step], in: events)
+        self.cone = Independence.normalForm(events: cone)
+        dropped = events.count - cone.count
+    }
+    var description: String {
+        "causal cone (\(dropped) independent events dropped):\n" + cone.map { "  \($0)" }.joined(separator: "\n")
+    }
+}
+
+/// A withdrawal and a transfer racing on A, a credit landing on B, and
+/// an unrelated withdrawal on C: dependence on A, noise on B and C.
+func transferRace(_ policy: @escaping Scheduler.Policy) -> (Scheduler.Outcome, trace: [String]) {
+    let scheduler = Scheduler()
+    let a = Account(name: "A", balance: 100, executor: scheduler.serialExecutor("A"))
+    let b = Account(name: "B", balance: 100, executor: scheduler.serialExecutor("B"))
+    let c = Account(name: "C", balance: 100, executor: scheduler.serialExecutor("C"))
+    let auditor = Auditor(executor: scheduler.serialExecutor("auditor"))
+    let outcome = scheduler.run(policy: policy) {
+        async let x = a.withdraw(100, auditedBy: auditor)
+        async let y = a.transfer(100, to: b, auditedBy: auditor)
+        async let z = c.withdraw(10, auditedBy: auditor)
+        _ = await (x, y, z)
+    }
+    return (outcome, scheduler.trace)
+}
+
+@Suite struct CausalExplanation {
+    /// The transfer race is found by the solvency formula; the
+    /// explanation is the A events only, B's credit and C's withdrawal
+    /// dropped, while the replayed trace keeps them.
+    @Test func theExplanationIsTheCausalCone() throws {
+        do {
+            try forAll(DrawnSchedules.schedules, seed: 3, database: "") { schedule in
+                let (outcome, trace) = transferRace(schedule.policy)
+                guard case .completed = outcome else { throw ScheduleError.didNotComplete(outcome, trace) }
+                try check("G(✓commit ⇒ balance ≥ 0)", DrawnSchedules.solvent, over: trace)
+            }
+            Issue.record("the transfer race was not found")
+        } catch let failure as PropertyFailure {
+            let minimal = try replay(DrawnSchedules.schedules, blob: try #require(failure.failures.first?.reproduceBlob))
+            let (_, trace) = transferRace(minimal.policy)
+            do {
+                try check("G(✓commit ⇒ balance ≥ 0)", DrawnSchedules.solvent, over: trace)
+                Issue.record("the minimal schedule does not fail")
+            } catch let violation as TemporalViolation {
+                let explanation = Explanation(violation: violation)
+                print("minimal schedule: \(minimal)\n\(explanation)")
+                #expect(explanation.cone.allSatisfy { Independence.subject($0) == "A" })
+                #expect(explanation.cone.map { $0.event.dropFirst().first! } == ["check", "check", "commit", "commit"])
+                #expect(explanation.dropped == 3)  // B credit, C check, C commit
+                #expect(Step.parse(trace).contains { Independence.subject($0) == "C" })
+            }
+        }
     }
 }
 
