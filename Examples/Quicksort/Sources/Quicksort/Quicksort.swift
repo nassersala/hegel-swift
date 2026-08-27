@@ -28,7 +28,7 @@ public func quicksort(_ input: [Int], bug: Bug = .none) -> (sorted: [Int], steps
     func sort(_ b: Int, _ t: Int) {
         if b < t {
             let p = partition(b, t)
-            steps.append(.partition(Lamport.Range(b, t), p: p, after: a))
+            steps.append(.partition(Lamport.Range(b, t), p: p, after: Array(a[b...t])))
             switch bug {
             case .none: sort(b, p)
             case .excludePivot: sort(b, p - 1)
@@ -71,7 +71,7 @@ public func worklistQuicksort(
             if i >= j { p = j; break }
             a.swapAt(i, j)
         }
-        steps.append(.partition(r, p: p, after: a))
+        steps.append(.partition(r, p: p, after: Array(a[r.b...r.t])))
         u.append(Lamport.Range(p + 1, r.t))
         u.append(Lamport.Range(r.b, p))  // last, so the depth-first pick takes the left child first, as the recursion does
     }

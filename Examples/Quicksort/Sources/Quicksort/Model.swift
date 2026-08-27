@@ -27,8 +27,10 @@ public struct Lamport: Sendable, Equatable, CustomStringConvertible {
     }
 
     /// One `Next` step: which range, and for a partition, which pivot and
-    /// which element of `Partitions`.
-    public enum Step: Sendable, Equatable, CustomStringConvertible {
+    /// which element of `Partitions`, recorded as the slice `A′[b...t]`:
+    /// only what the step touches, so steps on disjoint ranges are
+    /// independent as data, not only in effect.
+    public enum Step: Sendable, Hashable, CustomStringConvertible {
         case partition(Range, p: Int, after: [Int])
         case drop(Range)
         public var description: String {
@@ -50,12 +52,12 @@ public struct Lamport: Sendable, Equatable, CustomStringConvertible {
     public var done: Bool { u.isEmpty }
     public var description: String { "A = \(a), U = \(u.sorted())" }
 
-    /// `after ∈ Partitions(a, p, r.b, r.t)`.
+    /// `after` is `A′[r.b...r.t]` for some `A′ ∈ Partitions(a, p, r.b, r.t)`.
     public func isPartition(_ after: [Int], p: Int, of r: Range) -> Bool {
-        guard after.count == a.count, r.b <= p, p < r.t else { return false }
-        for i in a.indices where !(r.b...r.t).contains(i) && a[i] != after[i] { return false }
-        guard a[r.b...r.t].sorted() == after[r.b...r.t].sorted() else { return false }
-        return after[r.b...p].max()! <= after[(p + 1)...r.t].min()!
+        guard r.b <= p, p < r.t, after.count == r.t - r.b + 1 else { return false }
+        guard a[r.b...r.t].sorted() == after.sorted() else { return false }
+        let k = p - r.b + 1
+        return after[..<k].max()! <= after[k...].min()!
     }
 
     /// Whether `step` is a `Next` step from this state.
@@ -73,7 +75,7 @@ public struct Lamport: Sendable, Equatable, CustomStringConvertible {
         precondition(enabled(step), "not a Next step: \(step) from \(self)")
         switch step {
         case .partition(let r, let p, let after):
-            a = after
+            a.replaceSubrange(r.b...r.t, with: after)
             u.remove(r)
             u.insert(Range(r.b, p))
             u.insert(Range(p + 1, r.t))
@@ -92,9 +94,7 @@ public struct Lamport: Sendable, Equatable, CustomStringConvertible {
         // the rest right, each side in a drawn order.
         let values = a[r.b...r.t].sorted()
         let k = p - r.b + 1
-        var after = a
-        after.replaceSubrange(r.b...p, with: try shuffled(Array(values[..<k]), tc))
-        after.replaceSubrange((p + 1)...r.t, with: try shuffled(Array(values[k...]), tc))
+        let after = try shuffled(Array(values[..<k]), tc) + shuffled(Array(values[k...]), tc)
         return .partition(r, p: p, after: after)
     }
 

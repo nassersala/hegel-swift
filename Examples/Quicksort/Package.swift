@@ -9,12 +9,19 @@ let package = Package(
     name: "Quicksort",
     platforms: [.macOS(.v15)],
     products: [.library(name: "Quicksort", targets: ["Quicksort"])],
-    dependencies: [.package(path: "../..")],
+    dependencies: [
+        .package(path: "../.."),
+        .package(path: "../ScheduleProperties"),  // the controlled scheduler, for the parallel version
+    ],
     targets: [
         .target(name: "Quicksort", dependencies: [.product(name: "Hegel", package: "hegel-swift")]),
         .testTarget(
             name: "QuicksortTests",
-            dependencies: ["Quicksort", .product(name: "HegelTesting", package: "hegel-swift")]
+            dependencies: [
+                "Quicksort",
+                .product(name: "HegelTesting", package: "hegel-swift"),
+                .product(name: "Schedules", package: "ScheduleProperties"),
+            ]
         ),
     ]
 )

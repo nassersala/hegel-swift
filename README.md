@@ -638,6 +638,8 @@ The first bad step is a range the relation never produced, found before the sort
 
 Recursion is one implementation, not the algorithm. `worklistQuicksort` keeps `U` as a list and takes any range `pick` names: with the default depth-first pick its steps are the recursive quicksort's exactly, and with a drawn pick it produces behaviours the recursion never does. Both refine the same relation; that is the sense in which the recursive version's behaviours are a subset of the relation's.
 
+The worklist is also the parallel quicksort: one task per range, `U` the set of live tasks, and "pick any range" is the scheduler's choice of which task runs next. Under the controlled scheduler of `Examples/ScheduleProperties`, with the schedule drawn by hegel, every schedule's step sequence refines the relation. Two steps are independent iff their ranges are disjoint; over 100 schedules, 57 distinct step sequences and one equivalence class, the recursive quicksort's. That took one change to the model: a partition step records `A′[b...t]`, the slice it touched, not the whole array — with the whole array, steps on disjoint ranges differed as data (17 classes) while being independent in effect. The event carries what the step observes.
+
 A nondeterministic model chooses its successor by drawing it — `concurrency-semantics.md` asks how; this is the answer — and a deterministic implementation refines it by being one of its behaviours.
 
 ## Example: laws that fail for a reason
