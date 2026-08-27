@@ -81,6 +81,18 @@ extension Scheduled { @Suite struct TwoPhase {
         }
     }
 
+    /// The schedule PCT found the coordinator's reentrancy bug under:
+    /// p0 votes no, p1 yes, and the change points starve the coordinator's
+    /// own jobs. Agreement and validity hold now; deterministic.
+    @Test func regressionDecideAtTheCallSite() throws {
+        for schedule in [PCT(changePoints: [7, 0]).policy, PCT(changePoints: [16, 7]).policy, Schedule(deviations: [.init(choice: 0, index: 0), .init(choice: 7, index: 0)]).policy] {
+            let run = twoPhaseCommit(votes: [false, true], policy: schedule)
+            try Self.check("agreement", Self.agreement, over: run)
+            try Self.check("validity", Self.validity(2), over: run)
+            #expect(run.coordinator == .abort)
+        }
+    }
+
     /// The protocol's known liveness failure: the coordinator crashes
     /// after collecting the votes and every prepared participant blocks.
     /// Safety holds even then. hegel finds it and shrinks to the bare

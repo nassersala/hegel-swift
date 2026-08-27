@@ -46,27 +46,28 @@ public actor Coordinator: Node {
     func timeout() async {
         guard decision == nil, !crashed, votes.count < participants.count else { return }
         scheduler.note("c timeout \(votes.count)")
-        if bug == .commitOnTimeout, votes.values.allSatisfy({ $0 }) { await decide(.commit) } else { await decide(.abort) }
+        let d: Decision = (bug == .commitOnTimeout && votes.values.allSatisfy { $0 }) ? .commit : .abort
+        if take(d) { await broadcast(d) }
     }
 
-    /// The decision is taken before any `await`. The first version
-    /// checked `decision == nil` inside an `async` `decide` called with
-    /// `await` from `receive`; that `await` is a suspension point even
-    /// on the same actor, and hegel's PCT schedule ran the second vote
-    /// there: a `no` was recorded, the commit was decided on the `yes`,
-    /// and the abort found `decision` already set. Same shape as the
-    /// withdrawal race: the check and the write on either side of an
-    /// `await`.
-    func decide(_ d: Decision) async {
-        guard take(d) else { return }
-        for p in participants { await network.send(.decision(d), from: name, to: p) }
-    }
-
+    /// The decision is taken synchronously, at the call site, before any
+    /// `await`. The first coordinator had `await decide(.abort)` with the
+    /// check inside `decide`; hegel's PCT schedule showed that the `await`
+    /// on a same-actor method is a suspension point (the call was
+    /// enqueued as a new job on the coordinator), so the second vote ran
+    /// between the record of a `no` and the decision, the commit was
+    /// decided on the later `yes`, and the abort found `decision` set.
+    /// Moving the check into `decide` did not help: the suspension is
+    /// before `decide` runs. Same shape as the withdrawal race.
     func take(_ d: Decision) -> Bool {
         guard decision == nil else { return false }
         decision = d
         scheduler.note("c decide \(d.rawValue)")
         return true
+    }
+
+    func broadcast(_ d: Decision) async {
+        for p in participants { await network.send(.decision(d), from: name, to: p) }
     }
 
     public func receive(_ message: Message) async {
@@ -75,10 +76,13 @@ public actor Coordinator: Node {
         case .vote(let p, let yes):
             guard decision == nil, votes[p] == nil else { return }
             votes[p] = yes
-            if !yes { await decide(.abort); return }
+            if !yes {
+                if take(.abort) { await broadcast(.abort) }
+                return
+            }
             if votes.count == participants.count {
                 if crashAfterVotes { crashed = true; scheduler.note("c crash"); return }
-                await decide(.commit)
+                if take(.commit) { await broadcast(.commit) }
             }
         case .query(let p):
             if let decision { await network.send(.decision(decision), from: name, to: participants[p]) }
