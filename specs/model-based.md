@@ -395,7 +395,15 @@ seed 1 to exactly the six-step walk. The door consumer now loads its JSON
 into the block form (`problems()` is the artifact completeness check) and
 transports the theorem as an invariant over a SUT that records its last
 observation. Nullary command labels dropped the `()` so cells read
-`Δ ▸ enterPhone -> none`. Not done: `Laws.abstraction`, the
+`Δ ▸ enterPhone -> none`. Lean evaluator (same day, `Examples/LeanVerifiedModel`): the login with
+a `Nat` counter in Lean 4.33, `Inv` + three theorems proved, `@[export]`
+scalar wrappers, `lake build Otp:static` → `libotp_Otp.a` linked with
+`libInit.a libleanrt.a libuv.a libgmp.a` via `unsafeFlags`; a `Command`
+per stimulus whose `precondition:`/`model:` call the C. Lean rejected the
+naive invariant; α found a counter-after-sign-in mismatch no response
+shows; resend bug shrinks to 5 steps by observation, 3 with α. The
+verified-model lane therefore works past finite tables; the evaluator
+mode, not the table, is the one to spec. Not done: `Laws.abstraction`, the
 AgentProperties port (its cells also count fired effects, which needs the
 explicit-post form; not cleaner yet), `Pool` inside `args`.
 

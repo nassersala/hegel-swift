@@ -1,0 +1,21 @@
+name: LoginApp
+options:
+  bundleIdPrefix: dev.hegel.examples
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  LeanVerifiedModel:
+    path: ..
+targets:
+  LoginApp:
+    type: application
+    platform: iOS
+    sources: [LoginApp]
+    dependencies:
+      - package: LeanVerifiedModel
+        product: LoginUI
+    settings:
+      base:
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "6.0"

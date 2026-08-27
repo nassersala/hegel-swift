@@ -1,0 +1,5 @@
+name = "otp"
+defaultTargets = ["Otp"]
+
+[[lean_lib]]
+name = "Otp"
