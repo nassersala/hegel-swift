@@ -1,4 +1,5 @@
 import Testing
+import Hegel
 import Schedules
 
 /// E2a: determinism without hegel. One policy reproduces the race on
@@ -31,6 +32,11 @@ import Schedules
         #expect(twoWithdrawals(Scheduler.lifo, safe: true).balance == 0)
     }
 
+    /// The clock law as a formula over the step trace,
+    /// `G(✓advance ⇒ prev(ready = ∅) ∧ prev now < now)`: time moves only
+    /// when the step before left nothing ready (the trace records the
+    /// ready set on `run` lines), and strictly forward. The wake order is
+    /// an observation of the fixture, not of the trace, and stays raw.
     @Test func fakeClockOrdersSleepers() {
         let scheduler = Scheduler()
         let order = SendableBox<[String]>([])
@@ -44,7 +50,14 @@ import Schedules
         }
         #expect(order.value == ["1s", "2s", "3s"])
         if case .completed(_, let advances) = outcome { #expect(advances == 3) } else { Issue.record("\(outcome)") }
-        #expect(scheduler.now == .seconds(3))
+
+        let steps = Step.parse(scheduler.trace)
+        let clockLaw: Pred<Step> = always(
+            .ticked(.advance) => (prev(now { $0.ready.isEmpty }) && changed { $0.now < $1.now })
+        )
+        #expect(evaluate(clockLaw, over: steps), "\(firstFailure(of: clockLaw, over: steps).map { "at step \($0): \(steps[$0])" } ?? "")")
+        #expect(steps.filter { $0.kind == .advance }.count == 3)
+        #expect(steps.last?.now == .seconds(3))
     }
 }
 
@@ -66,11 +79,20 @@ import Schedules
     /// escapes to the global pool and only the awaiting resumption comes
     /// back. Code under test must spawn with `Task(executorPreference:)`
     /// or structured children to stay under control.
+    ///
+    /// Two claims. Safety, as a formula over the trace: after the root
+    /// step nothing runs until the resumption comes back on our lane,
+    /// `X(¬✓run W ✓run@tasks)`, weak because the trace may end first.
+    /// Liveness, "the resumption does come back", is not a formula: it
+    /// is `.completed` within the 2 s grace, a bounded surrogate whose
+    /// bound is wall time.
     @Test func unstructuredTaskBodyEscapes() {
         let scheduler = Scheduler()
         let outcome = scheduler.run(policy: Scheduler.fifo, grace: .seconds(2)) { await Task { }.value }
         if case .completed = outcome {} else { Issue.record("\(outcome)") }
-        #expect(runs(scheduler).count == 2)
+        let runs = Step.parse(scheduler.trace).filter { $0.kind == .run }
+        #expect(evaluate(next(weakUntil(!.ticked(.run), .ticked("tasks"))), over: runs))
+        #expect(runs.count == 2)
     }
 
     /// `Task(executorPreference:)` and task-group children are controlled.
@@ -95,7 +117,8 @@ import Schedules
         let outcome = scheduler.run(policy: Scheduler.fifo) { await Plain().touch() }
         if case .completed = outcome {} else { Issue.record("\(outcome)") }
         #expect(runs(scheduler).count == 3)
-        #expect(runs(scheduler).allSatisfy { $0.contains("@tasks") })
+        // G(✓run ⇒ lane = tasks)
+        #expect(evaluate(always(.ticked(.run) => now { $0.lane == "tasks" }), over: Step.parse(scheduler.trace)))
     }
 
     /// `Task.detached` drops the preference: its body escapes to the

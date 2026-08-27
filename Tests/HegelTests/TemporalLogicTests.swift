@@ -1,0 +1,62 @@
+import Hegel
+import Testing
+
+/// Each operator on a hand-written trace, including the end-of-trace
+/// conventions: weak until with a right side that never arrives, `prev`
+/// at position 0, `next` at the last position.
+@Suite struct TemporalLogic {
+    let positive: Pred<Int> = now { $0 > 0 }
+    let even: Pred<Int> = now { $0 % 2 == 0 }
+
+    @Test func atomsAndConnectives() {
+        #expect(evaluate(positive, over: [1, -1]))
+        #expect(!evaluate(positive, over: [-1, 1]))
+        #expect(evaluate(positive && even, over: [2]))
+        #expect(!evaluate(positive && even, over: [1]))
+        #expect(evaluate(positive || even, over: [-2]))
+        #expect(evaluate(!positive, over: [-1]))
+        #expect(evaluate(even => positive, over: [1]))   // vacuous
+        #expect(!evaluate(even => positive, over: [-2]))
+    }
+
+    @Test func alwaysChecksEveryPosition() {
+        #expect(evaluate(always(positive), over: [1, 2, 3]))
+        #expect(!evaluate(always(positive), over: [1, 2, 0]))
+        #expect(firstFailure(of: always(positive), over: [1, 2, 0]) == 2)
+        #expect(firstFailure(of: always(positive), over: [1, 2, 3]) == nil)
+        #expect(evaluate(always(positive), over: []))
+    }
+
+    @Test func nextLooksOneAhead() {
+        #expect(evaluate(next(positive), over: [-1, 1]))
+        #expect(!evaluate(next(positive), over: [1, -1]))
+        #expect(evaluate(next(positive), over: [-1]))  // last position: true
+        #expect(evaluate(always(even => next(positive)), over: [2, 1, 4]))
+    }
+
+    @Test func weakUntilHoldsWhenTheRightSideNeverHappens() {
+        // p until q, q never: p to the end of the trace is enough.
+        #expect(evaluate(weakUntil(positive, even), over: [1, 3, 5]))
+        // p breaks before q.
+        #expect(!evaluate(weakUntil(positive, even), over: [1, -3, 2]))
+        // q arrives; p need not hold at or after it.
+        #expect(evaluate(weakUntil(positive, even), over: [1, 2, -3]))
+        // q at the first position.
+        #expect(evaluate(weakUntil(.ff, even), over: [2, 1]))
+    }
+
+    @Test func prevIsFalseAtPositionZero() {
+        #expect(!evaluate(prev(positive), over: [1, 1]))
+        #expect(evaluate(always(prev(positive) => positive), over: [1, 2, 3]))
+        #expect(!evaluate(always(prev(positive) => positive), over: [1, -1]))
+    }
+
+    @Test func changedComparesWithThePreviousState() {
+        let grew: Pred<Int> = changed { $0 < $1 }
+        #expect(!evaluate(grew, over: [1, 2]))  // position 0: no previous
+        #expect(evaluate(next(grew), over: [1, 2]))
+        #expect(evaluate(always(next(grew)), over: [1, 2, 3]))
+        #expect(!evaluate(always(next(grew)), over: [1, 3, 2]))
+        #expect(firstFailure(of: always(next(grew)), over: [1, 3, 2]) == 1)
+    }
+}

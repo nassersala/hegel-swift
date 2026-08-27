@@ -557,6 +557,23 @@ run #5@account (ready: [#4@auditor])  // passes its check too; balance is still 
 
 Same seed, same blob, same trace across runs. Reach, measured: structured children, `Task(executorPreference:)`, actors with our executor, actors with the default executor (SE-0417 routes their jobs to the preferred task executor, so no `unownedExecutor` boilerplate), and sleeps on our clock are controlled. `Task {}` (it does not inherit the preference), `Task.detached`, `MainActor` and real-clock sleeps escape, body only; the resumption comes back, so order stays deterministic and only duration does not. A deadlock among controlled jobs is reported as `.stuck`.
 
+### Temporal formulas over the trace
+
+A schedule property can be a formula instead of a loop over the trace. `Pred<State>` is linear temporal logic over a finite trace of states, PropRatt's operator set (Nielsen, Kristiansen & Bahr, PADL 2026): atoms are closures, `always`, `next`, `weakUntil`, `prev`, and `changed` for `prev x < x`. The clock law of the controlled scheduler, time moves only when nothing is left ready and strictly forward:
+
+```swift
+let steps = Step.parse(scheduler.trace)   // one Step per trace line: kind, lane, ready set, now
+let clockLaw: Pred<Step> = always(
+    .ticked(.advance) => (prev(now { $0.ready.isEmpty }) && changed { $0.now < $1.now })
+)
+#expect(evaluate(clockLaw, over: steps))
+firstFailure(of: clockLaw, over: steps)   // the offending step, for the report
+```
+
+`ticked(lane)` is PropRatt's `✓sigₙ`: the step is the state, so "a job ran on this lane" is an atom. The escape tests state their safety half the same way, `next(weakUntil(!.ticked(.run), .ticked("tasks")))`: after the root step nothing runs until the resumption comes back.
+
+Only safety is testable on a finite trace. There is no `eventually`: a formula that can only be refuted by an infinite trace passes every test and proves nothing. `until` is weak (the right side may never arrive), `next` is true at the last position, `prev` is false at position 0, and `not(eventually p)` is `always(not p)`. The liveness half of the escape tests, "the resumption does come back", stays what it was: `outcome == .completed` within a 2 s grace, a bounded surrogate whose bound is wall time. The fixture's own state (the balance) is not in the trace, so the race is still found by its final state, not by a formula.
+
 ## Example: laws that fail for a reason
 
 `Examples/ComplexProperties` runs the catalog on swift-numerics' `Complex<Double>` with `equal:` = the library's own `isApproximatelyEqual` — relative tolerance, no absolute part: it accepts rounding and rejects cancellation, so what fails below fails because ℂ over doubles is not a field, not because the tolerance is ours. Inputs are log-uniform across fifteen decades (a mantissa in ±10 at a scale from 1e−12 to 1e3). Under that: `*` is a commutative monoid, `+` is commutative with identity 0, `z · (1/z) = 1` away from 0, `*` distributes over `+`, `|zw| = |z||w|`, conjugation is a ring automorphism and an involution (exactly), `exp(a + b) = exp(a) exp(b)`, `exp(iθ) = cos θ + i sin θ`, polar form round-trips.
