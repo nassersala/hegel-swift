@@ -82,6 +82,22 @@ func transferRace(_ policy: @escaping Scheduler.Policy) -> (Scheduler.Outcome, t
 }
 
 @Suite struct CausalExplanation {
+    /// How much the relation collapses on the transfer fixture, for the
+    /// comparison with TLC's state space: raw traces vs classes, and
+    /// how many classes fail.
+    @Test func classesOnTheTransferFixture() throws {
+        var raw = Set<[String]>(), classes = Set<[Step]>(), failing = Set<[Step]>()
+        try forAll(DrawnSchedules.schedules, testCases: 200, database: "") { schedule in
+            let (_, trace) = transferRace(schedule.policy)
+            let form = Independence.normalForm(trace)
+            raw.insert(trace); classes.insert(form)
+            if (try? check("solvent", DrawnSchedules.solvent, over: trace)) == nil { failing.insert(form) }
+        }
+        print("transfer fixture over 200 schedules: \(raw.count) distinct traces, \(classes.count) classes, \(failing.count) failing classes")
+        #expect(classes.count < raw.count)
+        #expect(!failing.isEmpty)
+    }
+
     /// The transfer race is found by the solvency formula; the
     /// explanation is the A events only, B's credit and C's withdrawal
     /// dropped, while the replayed trace keeps them.

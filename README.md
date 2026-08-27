@@ -609,7 +609,7 @@ causal cone (3 independent events dropped):
 
 This is presentation over the shrinker's result, not a stronger shrink: minimality is still "fewest deviations", and the dropped events are still in the trace that reproduces the failure.
 
-The same relation, model-checked: `Examples/ScheduleProperties/TLA/Bank.tla` is the bank as a TLA+ spec (the LTS of `Examples/LeanVerifiedModel/Lean/Bank/Model.lean`), and TLC finds the unsafe counterexample in 5 states — `checkPass a, checkPass b, commit a, commit b` — the same abstract trace as the Lean witness and as hegel's shrunk event trace. It also checks what a finite test cannot: both variants terminate under weak fairness, and neither deadlocks. `TLA/run.sh` runs the unsafe and safe configurations.
+The same relation, model-checked: `Examples/ScheduleProperties/TLA/Bank.tla` is the bank as a TLA+ spec (the LTS of `Examples/LeanVerifiedModel/Lean/Bank/Model.lean`), and TLC finds the unsafe counterexample in 5 states — `checkPass a, checkPass b, commit a, commit b` — the same abstract trace as the Lean witness and as hegel's shrunk event trace. It also checks what a finite test cannot: both variants terminate under weak fairness, and neither deadlocks. `TLA/Transfer.tla` is the transfer fixture: 79 states, and TLC's 5-state counterexample never touches C, breadth-first search reaching the violation before any independent event. Hegel on the same fixture: 200 schedules, 39 distinct traces, 3 classes under the relation, 1 failing. `TLA/run.sh` runs all four configurations.
 
 ## Example: laws that fail for a reason
 

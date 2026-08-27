@@ -1,11 +1,16 @@
 #!/bin/sh
-# Model-checks Bank.tla both ways. Needs a Java runtime and tla2tools.jar
-# (https://github.com/tlaplus/tlaplus/releases); point TLA2TOOLS at the jar.
+# Model-checks Bank.tla (three configurations) and Transfer.tla. Needs a
+# Java runtime and tla2tools.jar (https://github.com/tlaplus/tlaplus/releases);
+# point JAVA and TLA2TOOLS at them.
 set -e
 cd "$(dirname "$0")"
 JAVA="${JAVA:-java}"
 JAR="${TLA2TOOLS:-tla2tools.jar}"
-for cfg in Unsafe UnsafeMechanism Safe; do
-  echo "== $cfg"
-  "$JAVA" -cp "$JAR" tlc2.TLC -config "$cfg.cfg" -workers 1 -deadlock -metadir "states/$cfg" Bank.tla || true
-done
+check() {  # module config
+  echo "== $2"
+  "$JAVA" -cp "$JAR" tlc2.TLC -config "$2.cfg" -workers 1 -deadlock -metadir "states/$2" "$1.tla" || true
+}
+check Bank Unsafe
+check Bank UnsafeMechanism
+check Bank Safe
+check Transfer Transfer
