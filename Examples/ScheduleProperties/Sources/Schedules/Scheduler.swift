@@ -1,4 +1,5 @@
 import os
+import Foundation
 
 /// A controlled scheduler: one ready queue for every executor it hands
 /// out, a fake clock, and a policy that picks which ready job runs next.
@@ -16,7 +17,18 @@ public final class Scheduler: @unchecked Sendable {
         public let id: Int
         /// The executor the job was enqueued on.
         public let lane: String
+        /// The runtime's id of the task this job belongs to, the same
+        /// across a task's resumptions; 0 when the job is not a task's.
+        /// Read from `ExecutorJob.description` (`ExecutorJob(id: N)`),
+        /// the one place public API shows it.
+        public let task: Int
         public var description: String { "#\(id)@\(lane)" }
+    }
+
+    /// One choice the policy made: which ready index, of how many.
+    public struct Choice: Sendable, Equatable {
+        public let index: Int
+        public let width: Int
     }
 
     public enum Outcome: Sendable, Equatable {
@@ -48,6 +60,8 @@ public final class Scheduler: @unchecked Sendable {
         var trace: [String] = []
         var maxReadyWidth = 0
         var choicePoints = 0
+        var choices: [Choice] = []
+        var jobs: [JobInfo] = []
     }
 
     let state = OSAllocatedUnfairLock(initialState: State())
@@ -60,6 +74,11 @@ public final class Scheduler: @unchecked Sendable {
     public var maxReadyWidth: Int { state.withLock { $0.maxReadyWidth } }
     /// How many steps of the last run had two or more ready jobs.
     public var choicePoints: Int { state.withLock { $0.choicePoints } }
+    /// The choices of the last run, one per choice point, so any policy's
+    /// run can be restated as a `Schedule` (`Schedule(explaining:)`).
+    public var choices: [Choice] { state.withLock { $0.choices } }
+    /// Every job enqueued in the last run, in enqueue order, with its task.
+    public var jobs: [JobInfo] { state.withLock { $0.jobs } }
     /// The fake clock's current time.
     public var now: Duration { state.withLock { $0.now } }
 
@@ -77,11 +96,12 @@ public final class Scheduler: @unchecked Sendable {
 
     public lazy var clock = FakeClock(scheduler: self)
 
-    func enqueue(_ job: UnownedJob, on lane: any Lane) {
+    func enqueue(_ job: UnownedJob, task: Int, on lane: any Lane) {
         state.withLock { s in
-            let info = JobInfo(id: s.nextId, lane: lane.name)
+            let info = JobInfo(id: s.nextId, lane: lane.name, task: task)
             s.nextId += 1
             s.ready.append(Pending(info: info, job: job, executor: lane))
+            s.jobs.append(info)
             s.trace.append("enqueue \(info)")
         }
     }
@@ -140,6 +160,7 @@ public final class Scheduler: @unchecked Sendable {
                     index = policy(s.ready.map(\.info), s.choicePoints)
                     precondition(s.ready.indices.contains(index), "policy chose \(index) of \(s.ready.count)")
                     s.choicePoints += 1
+                    s.choices.append(Choice(index: index, width: s.ready.count))
                 }
                 let chosen = s.ready.remove(at: index)
                 s.trace.append(s.ready.isEmpty ? "run \(chosen.info)" : "run \(chosen.info) (ready: \(s.ready.map(\.info)))")
@@ -191,7 +212,8 @@ public final class ControlledSerialExecutor: SerialExecutor, Lane, @unchecked Se
         self.scheduler = scheduler
     }
     public func enqueue(_ job: consuming ExecutorJob) {
-        scheduler.enqueue(UnownedJob(job), on: self)
+        let task = taskId(of: job.description)
+        scheduler.enqueue(UnownedJob(job), task: task, on: self)
     }
     public func asUnownedSerialExecutor() -> UnownedSerialExecutor {
         UnownedSerialExecutor(ordinary: self)
@@ -209,7 +231,8 @@ public final class ControlledTaskExecutor: TaskExecutor, Lane, @unchecked Sendab
         self.scheduler = scheduler
     }
     public func enqueue(_ job: consuming ExecutorJob) {
-        scheduler.enqueue(UnownedJob(job), on: self)
+        let task = taskId(of: job.description)
+        scheduler.enqueue(UnownedJob(job), task: task, on: self)
     }
     public func asUnownedTaskExecutor() -> UnownedTaskExecutor {
         UnownedTaskExecutor(ordinary: self)
@@ -217,6 +240,12 @@ public final class ControlledTaskExecutor: TaskExecutor, Lane, @unchecked Sendab
     func run(_ job: UnownedJob) {
         job.runSynchronously(on: asUnownedTaskExecutor())
     }
+}
+
+/// `ExecutorJob(id: 7)` → 7. Anything else → 0.
+func taskId(of description: String) -> Int {
+    guard let open = description.firstIndex(of: ":"), let close = description.lastIndex(of: ")") else { return 0 }
+    return Int(description[description.index(after: open)..<close].trimmingCharacters(in: .whitespaces)) ?? 0
 }
 
 // MARK: - Fake clock

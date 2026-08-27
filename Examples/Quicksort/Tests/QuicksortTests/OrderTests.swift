@@ -50,7 +50,10 @@ actor Cell {
     nonisolated var unownedExecutor: UnownedSerialExecutor { executor.asUnownedSerialExecutor() }
     private(set) var order: Order
     private(set) var firings = 0
-    init(count: Int, executor: ControlledSerialExecutor) { order = .bottom(count); self.executor = executor }
+    /// `recheck: false` reinstates the lost wakeup, for measuring how
+    /// fast each schedule generator finds it.
+    let recheck: Bool
+    init(count: Int, executor: ControlledSerialExecutor, recheck: Bool = true) { order = .bottom(count); self.executor = executor; self.recheck = recheck }
     func join(_ fact: Fact) { order = order.join(Order(count: order.count, pairs: fact)); firings += 1 }
 }
 
@@ -156,7 +159,10 @@ actor ThresholdCell {
     nonisolated var unownedExecutor: UnownedSerialExecutor { executor.asUnownedSerialExecutor() }
     private(set) var order: Order
     private var waiters: [(threshold: @Sendable (Order) -> Bool, continuation: CheckedContinuation<Order, Never>)] = []
-    init(count: Int, executor: ControlledSerialExecutor) { order = .bottom(count); self.executor = executor }
+    /// `recheck: false` reinstates the lost wakeup, for measuring how
+    /// fast each schedule generator finds it.
+    let recheck: Bool
+    init(count: Int, executor: ControlledSerialExecutor, recheck: Bool = true) { order = .bottom(count); self.executor = executor; self.recheck = recheck }
 
     func join(_ fact: Fact) {
         order = order.join(Order(count: order.count, pairs: fact))
@@ -174,7 +180,7 @@ actor ThresholdCell {
     func read(when threshold: @escaping @Sendable (Order) -> Bool) async -> Order {
         if threshold(order) { return order }
         return await withCheckedContinuation { continuation in
-            if threshold(order) { continuation.resume(returning: order) } else { waiters.append((threshold, continuation)) }
+            if recheck, threshold(order) { continuation.resume(returning: order) } else { waiters.append((threshold, continuation)) }
         }
     }
 }
@@ -182,10 +188,26 @@ actor ThresholdCell {
 /// Runs the threshold mergesort: one task per node, `dropping` nodes never
 /// spawned (a lost propagator). Returns the outcome, the order, and the
 /// comparison count.
-func thresholdMergesort(_ values: [Int], dropping: Set<Int> = [], grace: Duration = .milliseconds(20), policy: @escaping Scheduler.Policy) -> (Scheduler.Outcome, Order, comparisons: Int) {
+func thresholdMergesort(_ values: [Int], dropping: Set<Int> = [], grace: Duration = .milliseconds(20), recheck: Bool = true, policy: @escaping Scheduler.Policy) -> (Scheduler.Outcome, Order, comparisons: Int) {
+    let run = thresholdMergesortRun(values, dropping: dropping, grace: grace, recheck: recheck, policy: policy)
+    return (run.outcome, run.order, run.comparisons)
+}
+
+struct ThresholdRun {
+    var outcome: Scheduler.Outcome
+    var order: Order
+    var comparisons: Int
+    /// The scheduler's choices, choice-point count and task count of the
+    /// sorting run (read before the run that reads the cell back).
+    var choices: [Scheduler.Choice]
+    var choicePoints: Int
+    var tasks: Int
+}
+
+func thresholdMergesortRun(_ values: [Int], dropping: Set<Int> = [], grace: Duration = .milliseconds(20), recheck: Bool = true, policy: @escaping Scheduler.Policy) -> ThresholdRun {
     let n = values.count
     let scheduler = Scheduler()
-    let cell = ThresholdCell(count: n, executor: scheduler.serialExecutor("cell"))
+    let cell = ThresholdCell(count: n, executor: scheduler.serialExecutor("cell"), recheck: recheck)
     let comparisons = SendableBox(0)
     let nodes = MergeNode.tree(n)
     let outcome = scheduler.run(policy: policy, grace: grace) {
@@ -200,9 +222,10 @@ func thresholdMergesort(_ values: [Int], dropping: Set<Int> = [], grace: Duratio
             }
         }
     }
+    let choices = scheduler.choices, choicePoints = scheduler.choicePoints, tasks = Set(scheduler.jobs.map(\.task)).count
     let box = SendableBox<Order>(.bottom(n))
     _ = scheduler.run(policy: Scheduler.fifo) { box.value = await cell.order }
-    return (outcome, box.value, comparisons.value)
+    return ThresholdRun(outcome: outcome, order: box.value, comparisons: comparisons.value, choices: choices, choicePoints: choicePoints, tasks: tasks)
 }
 
 extension Scheduled { @Suite struct ThresholdReads {

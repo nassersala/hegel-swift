@@ -23,6 +23,16 @@ public struct Schedule: Sendable, Equatable, CustomStringConvertible {
         self.deviations = deviations
     }
 
+    /// The schedule that restates a run: one deviation per choice point at
+    /// which `choices` did not pick the depth-first job. Replaying it
+    /// reproduces the run exactly, whatever policy made the choices — so a
+    /// `PCT` run is found by priorities and reported as deviations.
+    public init(explaining choices: [Scheduler.Choice]) {
+        deviations = choices.enumerated().compactMap { c, choice in
+            choice.index == choice.width - 1 ? nil : Deviation(choice: c, index: choice.index)
+        }
+    }
+
     public var policy: Scheduler.Policy {
         let deviations = deviations
         return { ready, choice in

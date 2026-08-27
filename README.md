@@ -557,6 +557,17 @@ run #5@account (ready: [#4@auditor])  // passes its check too; balance is still 
 
 Same seed, same blob, same trace across runs. Reach, measured: structured children, `Task(executorPreference:)`, actors with our executor, actors with the default executor (SE-0417 routes their jobs to the preferred task executor, so no `unownedExecutor` boilerplate), and sleeps on our clock are controlled. `Task {}` (it does not inherit the preference), `Task.detached`, `MainActor` and real-clock sleeps escape, body only; the resumption comes back, so order stays deterministic and only duration does not. A deadlock among controlled jobs is reported as `.stuck`.
 
+`PCT` is a second generator, after Burckhardt, Kothari, Musuvathi and Nagarakatte (ASPLOS 2010): hegel draws a priority per task and `d − 1` change points; the highest-priority ready task runs, and at a change point the running task drops below every other. A bug that needs `d − 1` preemptions is found with probability at least `1/(n·k^(d−1))` per run, `n` tasks, `k` steps. A task is a Swift task: `JobInfo.task` is the runtime's task id, read from `ExecutorJob.description` (`ExecutorJob(id: 7)`, the one place public API shows it), the same across a task's resumptions. A step is a choice point, since the scheduler chooses only when two or more jobs are ready and a change point anywhere else does nothing; `k` is `Scheduler.choicePoints`, and change points are drawn from `0..<k`. `Schedule(explaining: scheduler.choices)` restates any run as deviations, so PCT finds and the deviation list is what is shrunk, replayed and read.
+
+Runs to first failure over 20 seeds, uniform deviations against PCT at depth 2:
+
+```
+twoWithdrawals (n = 3, k = 4, bound n·k = 12):   uniform median 6,  max 46;   PCT median 3,  max 6
+lost wakeup    (n = 6, k = 24, bound n·k = 144): uniform median 72, max 565;  PCT median 17, max 63
+```
+
+The lost wakeup in `ThresholdCell.read` (`Examples/Quicksort`) needed three exact deviations under uniform drawing; it is one preemption of the reader between its check and its registration, depth 2, and PCT finds it four times faster. On the small fixture uniform was already fast, and PCT is twice as fast again; the bound holds on both.
+
 ### Temporal formulas over the trace
 
 A schedule property can be a formula instead of a loop over the trace. `Pred<State>` is linear temporal logic over a finite trace of states, PropRatt's operator set (Nielsen, Kristiansen & Bahr, PADL 2026): atoms are closures, `always`, `next`, `weakUntil`, `prev`, and `changed` for `prev x < x`. The clock law of the controlled scheduler, time moves only when nothing is left ready and strictly forward:
@@ -773,6 +784,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - Le, Afshari, Su, *Compiler Validation via Equivalence Modulo Inputs* (PLDI 2014) · Donaldson, Evrard, Lascu, Thomson, *Automated Testing of Graphics Shader Compilers* (OOPSLA 2017) — the shape of `Examples/RegexProperties`
 - Erik Meijer, *Guardians of the Agents: Formal Verification of AI Workflows* (CACM 69(1), 2026, DOI 10.1145/3777544) — generate, verify, then execute; `VerifiedWorkflow` · Mills, Dyer, Linger, *Cleanroom Software Engineering* (IEEE Software 1987) · Prowell & Poore, *Foundations of Sequence-Based Software Specification* (IEEE TSE 2003) — the enumeration table · John Hughes, *How to Specify It!* (TFP 2019) — model-based properties as the strongest kind; the shape of `Examples/AgentProperties`
 - Alzahrani, Spichkova, Harland, [*Application of property-based testing tools for metamorphic testing*](https://arxiv.org/abs/2211.12003) (2022) — metamorphic testing as a kind of PBT, the stance `forAll(source:relations:subject:)` takes
+- Burckhardt, Kothari, Musuvathi, Nagarakatte, *A Randomized Scheduler with Probabilistic Guarantees of Finding Bugs* (ASPLOS 2010) — PCT; `Schedules.PCT`
 
 ## Crafted By:
 Nasser Ali Alzahrani [@nassersala](http://twitter.com/nassersala)

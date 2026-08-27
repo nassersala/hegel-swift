@@ -368,6 +368,15 @@ story (second withdrawal checks and hops; first withdrawal starts there;
 both checks see 100). The test prints the trace by replaying the shrunk
 schedule. Not done: PCT weighting, fake-clock cancellation, targeted
 search.
+PCT (2026-08-27): `Schedules.PCT` (priorities by task rank, change points at
+choice-point numbers drawn from `0..<k`); task identity from
+`ExecutorJob.description` (`ExecutorJob(id: N)`, stable across resumptions,
+public API); step = choice point, so `k = choicePoints`; a PCT run is
+restated as deviations by `Schedule(explaining:)`, so the report and shrinker
+are unchanged. Runs to first failure, 20 seeds, uniform vs PCT(d=2):
+twoWithdrawals (n=3, k=4) median 6 vs 3; the ThresholdCell lost wakeup
+(n=6, k=24) median 72 vs 17. Both within the bound `n·k`. Fake-clock
+cancellation and targeted search remain.
 
 Deliverable if it survives: a `Schedules` module (name open) plus an
 example; a writeup regardless, because a documented failure ("these
