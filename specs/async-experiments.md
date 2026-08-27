@@ -376,7 +376,10 @@ restated as deviations by `Schedule(explaining:)`, so the report and shrinker
 are unchanged. Runs to first failure, 20 seeds, uniform vs PCT(d=2):
 twoWithdrawals (n=3, k=4) median 6 vs 3; the ThresholdCell lost wakeup
 (n=6, k=24) median 72 vs 17. Both within the bound `n·k`. Fake-clock
-cancellation and targeted search remain.
+cancellation (same day): `FakeClock.sleep` honours cancellation with
+`withTaskCancellationHandler`; the timer is dropped (`cancel #id` trace line),
+the sleeper throws `CancellationError` at once, and the clock does not advance
+for it. Targeted search remains.
 
 Deliverable if it survives: a `Schedules` module (name open) plus an
 example; a writeup regardless, because a documented failure ("these

@@ -170,3 +170,65 @@ import Schedules
         #expect(outcome == .stuck(steps: 1))
     }
 }
+
+/// Cancellation on the fake clock: a cancelled sleeper throws at once and
+/// its timer is dropped, so the clock never advances for it.
+@Suite struct FakeClockCancellation {
+    /// A child sleeping for an hour is cancelled when its sibling finishes:
+    /// the run completes with no clock advance, and the sleep threw
+    /// `CancellationError`.
+    @Test func aCancelledSleeperDoesNotAdvanceTheClock() {
+        let scheduler = Scheduler()
+        let clock = scheduler.clock
+        let thrown = SendableBox<String>("")
+        let outcome = scheduler.run(policy: Scheduler.fifo) {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    do { try await clock.sleep(for: .seconds(3600)) } catch { thrown.value = "\(type(of: error))" }
+                }
+                group.addTask {}
+                await group.next()
+                group.cancelAll()
+            }
+        }
+        #expect(outcome == .completed(steps: scheduler.trace.filter { $0.hasPrefix("run") }.count, clockAdvances: 0))
+        #expect(thrown.value == "CancellationError")
+        #expect(scheduler.now == .zero)
+        #expect(scheduler.trace.contains { $0.hasPrefix("cancel #") })
+    }
+
+    /// Cancelled before sleeping: throws without registering a timer.
+    @Test func sleepingWhileCancelledThrowsAtOnce() {
+        let scheduler = Scheduler()
+        let clock = scheduler.clock
+        let thrown = SendableBox<Bool>(false)
+        _ = scheduler.run(policy: Scheduler.fifo) {
+            let t = Task { try await clock.sleep(for: .seconds(1)) }
+            t.cancel()
+            do { try await t.value } catch is CancellationError { thrown.value = true } catch {}
+        }
+        #expect(thrown.value)
+        #expect(!scheduler.trace.contains { $0.hasPrefix("timer") })
+    }
+
+    /// Cancelling one sleeper leaves the others' order and deadlines alone.
+    @Test func otherSleepersAreUnaffected() {
+        let scheduler = Scheduler()
+        let clock = scheduler.clock
+        let order = SendableBox<[String]>([])
+        let outcome = scheduler.run(policy: Scheduler.fifo) {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { try? await clock.sleep(for: .seconds(2)); order.value.append("2s") }
+                group.addTask { try? await clock.sleep(for: .seconds(1)); order.value.append("1s") }
+                let victim = Task(executorPreference: scheduler.taskExecutor) {
+                    if (try? await clock.sleep(for: .seconds(3))) != nil { order.value.append("3s") }
+                }
+                victim.cancel()
+                await victim.value
+            }
+        }
+        if case .completed(_, let advances) = outcome { #expect(advances == 2) } else { Issue.record("\(outcome)") }
+        #expect(order.value == ["1s", "2s"])
+        #expect(scheduler.now == .seconds(2))
+    }
+}

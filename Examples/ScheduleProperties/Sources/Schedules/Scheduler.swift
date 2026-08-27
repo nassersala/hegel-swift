@@ -50,7 +50,7 @@ public final class Scheduler: @unchecked Sendable {
     struct Timer {
         let id: Int
         let deadline: Duration
-        let continuation: CheckedContinuation<Void, Never>
+        let continuation: CheckedContinuation<Void, any Error>
     }
     struct State {
         var ready: [Pending] = []
@@ -62,6 +62,8 @@ public final class Scheduler: @unchecked Sendable {
         var choicePoints = 0
         var choices: [Choice] = []
         var jobs: [JobInfo] = []
+        /// Timer ids cancelled before their continuation was registered.
+        var cancelledTimers: Set<Int> = []
     }
 
     let state = OSAllocatedUnfairLock(initialState: State())
@@ -114,13 +116,38 @@ public final class Scheduler: @unchecked Sendable {
         state.withLock { $0.trace.append("event \(event)") }
     }
 
-    func sleep(until deadline: Duration, _ continuation: CheckedContinuation<Void, Never>) {
+    func timerId() -> Int {
         state.withLock { s in
             let id = s.nextId
             s.nextId += 1
+            return id
+        }
+    }
+
+    /// Registers the timer, or resumes it cancelled at once if the
+    /// cancellation handler already ran.
+    func sleep(id: Int, until deadline: Duration, _ continuation: CheckedContinuation<Void, any Error>) {
+        let cancelled: Bool = state.withLock { s in
+            if s.cancelledTimers.remove(id) != nil { return true }
             s.timers.append(Timer(id: id, deadline: deadline, continuation: continuation))
             s.trace.append("timer #\(id) until \(deadline)")
+            return false
         }
+        if cancelled { continuation.resume(throwing: CancellationError()) }
+    }
+
+    /// Cancels a pending timer: the sleeper resumes throwing, as a job
+    /// on its executor, and the clock never advances for it.
+    func cancelTimer(_ id: Int) {
+        let timer: Timer? = state.withLock { s in
+            guard let i = s.timers.firstIndex(where: { $0.id == id }) else {
+                s.cancelledTimers.insert(id)
+                return nil
+            }
+            s.trace.append("cancel #\(id)")
+            return s.timers.remove(at: i)
+        }
+        timer?.continuation.resume(throwing: CancellationError())
     }
 
     // MARK: Running
@@ -182,7 +209,7 @@ public final class Scheduler: @unchecked Sendable {
             }
             if !fired.isEmpty {
                 advances += 1
-                for timer in fired { timer.continuation.resume() }
+                for timer in fired { timer.continuation.resume(returning: ()) }
                 continue
             }
             // Nothing ready, no timers. Give escaped work a moment to come back.
@@ -262,11 +289,19 @@ public struct FakeClock: Clock, Sendable {
     public var now: Instant { Instant(offset: scheduler.now) }
     public var minimumResolution: Duration { .nanoseconds(1) }
 
-    /// Registers a timer with the scheduler. Cancellation is not honoured
-    /// in E2a: a cancelled sleeper still wakes at its deadline.
+    /// Registers a timer with the scheduler. Cancellation is honoured:
+    /// a cancelled sleeper throws `CancellationError` at once (a `cancel`
+    /// trace line) and its timer is dropped, so the clock does not
+    /// advance for it.
     public func sleep(until deadline: Instant, tolerance: Duration? = nil) async throws {
+        try Task.checkCancellation()
         if deadline.offset <= scheduler.now { return }
-        await withCheckedContinuation { scheduler.sleep(until: deadline.offset, $0) }
+        let id = scheduler.timerId()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { scheduler.sleep(id: id, until: deadline.offset, $0) }
+        } onCancel: {
+            scheduler.cancelTimer(id)
+        }
     }
 }
 
