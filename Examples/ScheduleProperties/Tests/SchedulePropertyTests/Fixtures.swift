@@ -6,9 +6,12 @@ import Schedules
 actor Account {
     let executor: ControlledSerialExecutor
     nonisolated var unownedExecutor: UnownedSerialExecutor { executor.asUnownedSerialExecutor() }
+    /// Names this account's events in the trace.
+    let name: String
     private(set) var balance: Int
 
-    init(balance: Int, executor: ControlledSerialExecutor) {
+    init(name: String = "account", balance: Int, executor: ControlledSerialExecutor) {
+        self.name = name
         self.balance = balance
         self.executor = executor
     }
@@ -16,19 +19,19 @@ actor Account {
     /// Buggy: the balance may change across the `await`.
     func withdraw(_ amount: Int, auditedBy auditor: Auditor) async -> Bool {
         guard balance >= amount else { return false }
-        executor.scheduler.note("check \(balance)")
+        executor.scheduler.note("\(name) check \(balance)")
         await auditor.record("withdraw \(amount)")
         balance -= amount  // may go negative
-        executor.scheduler.note("commit \(balance)")
+        executor.scheduler.note("\(name) commit \(balance)")
         return true
     }
 
     /// Fixed: commit before suspending.
     func withdrawSafely(_ amount: Int, auditedBy auditor: Auditor) async -> Bool {
         guard balance >= amount else { return false }
-        executor.scheduler.note("check \(balance)")
+        executor.scheduler.note("\(name) check \(balance)")
         balance -= amount
-        executor.scheduler.note("commit \(balance)")
+        executor.scheduler.note("\(name) commit \(balance)")
         await auditor.record("withdraw \(amount)")
         return true
     }

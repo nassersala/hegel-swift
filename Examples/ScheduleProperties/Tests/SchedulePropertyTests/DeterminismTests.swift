@@ -86,9 +86,15 @@ import Schedules
     /// Liveness, "the resumption does come back", is not a formula: it
     /// is `.completed` within the 2 s grace, a bounded surrogate whose
     /// bound is wall time.
+    ///
+    /// The body sleeps so it cannot finish before the root suspends on
+    /// `.value`; otherwise there is no resumption job and the count is
+    /// 1 (observed about one run in six).
     @Test func unstructuredTaskBodyEscapes() {
         let scheduler = Scheduler()
-        let outcome = scheduler.run(policy: Scheduler.fifo, grace: .seconds(2)) { await Task { }.value }
+        let outcome = scheduler.run(policy: Scheduler.fifo, grace: .seconds(2)) {
+            await Task { try? await Task.sleep(for: .milliseconds(10)) }.value
+        }
         if case .completed = outcome {} else { Issue.record("\(outcome)") }
         let runs = Step.parse(scheduler.trace).filter { $0.kind == .run }
         #expect(evaluate(next(weakUntil(!.ticked(.run), .ticked("tasks"))), over: runs))

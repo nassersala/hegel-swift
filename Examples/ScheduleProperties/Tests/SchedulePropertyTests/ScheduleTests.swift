@@ -125,4 +125,5 @@ import Schedules
 enum ScheduleError: Error {
     case didNotComplete(Scheduler.Outcome, [String])
     case invariantBroken(Int, [String])
+    case notEquivalent([Step], [Step])
 }

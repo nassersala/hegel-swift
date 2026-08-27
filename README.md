@@ -594,6 +594,8 @@ G(✓commit ⇒ balance ≥ 0) fails at step 23
 > event commit -100
 ```
 
+Events also make schedule equivalence concrete. Two events on different accounts are independent; adjacent independent events may be swapped; a trace's normal form is the result of swapping into account order until nothing moves (Mazurkiewicz traces). One withdrawal on each of three accounts: 100 drawn schedules give 17 distinct traces and one equivalence class, and every schedule's normal form equals the default schedule's. Two withdrawals on one account are dependent (their `check`/`commit` values depend on the order), so the racing and the depth-first schedule stay different classes; the relation does not erase the bug. The independence relation lives in the example (`Independence.swift`), not in the scheduler: what commutes is a fact about the subject.
+
 ## Example: laws that fail for a reason
 
 `Examples/ComplexProperties` runs the catalog on swift-numerics' `Complex<Double>` with `equal:` = the library's own `isApproximatelyEqual` — relative tolerance, no absolute part: it accepts rounding and rejects cancellation, so what fails below fails because ℂ over doubles is not a field, not because the tolerance is ours. Inputs are log-uniform across fifteen decades (a mantissa in ±10 at a scale from 1e−12 to 1e3). Under that: `*` is a commutative monoid, `+` is commutative with identity 0, `z · (1/z) = 1` away from 0, `*` distributes over `+`, `|zw| = |z||w|`, conjugation is a ring automorphism and an involution (exactly), `exp(a + b) = exp(a) exp(b)`, `exp(iθ) = cos θ + i sin θ`, polar form round-trips.

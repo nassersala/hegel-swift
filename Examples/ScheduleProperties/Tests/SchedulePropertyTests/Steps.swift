@@ -5,8 +5,8 @@ import Schedules
 /// PropRatt's tick atoms are atoms over the step's kind and lane. The
 /// fixture's own state (the balance) is not in the trace; formulas here
 /// speak about the scheduler, not the account.
-struct Step: Equatable, Sendable, CustomStringConvertible {
-    enum Kind: Equatable, Sendable { case enqueue, run, timer, advance, event }
+struct Step: Hashable, Sendable, CustomStringConvertible {
+    enum Kind: Hashable, Sendable { case enqueue, run, timer, advance, event }
     var kind: Kind
     var id: Int?
     var lane: String?
@@ -14,7 +14,8 @@ struct Step: Equatable, Sendable, CustomStringConvertible {
     var ready: [String]
     /// The fake clock after this step.
     var now: Duration
-    /// For `event` steps: the words after `event`, e.g. `["commit", "-100"]`.
+    /// For `event` steps: the words after `event`, `[subject, name, value]`,
+    /// e.g. `["account", "commit", "-100"]`.
     var event: [String] = []
     var description: String {
         kind == .event ? "event \(event.joined(separator: " "))" : "\(kind) #\(id.map(String.init) ?? "-")@\(lane ?? "-") ready \(ready) at \(now)"
@@ -73,9 +74,9 @@ extension Pred where State == Step {
     static func ticked(_ lane: String) -> Pred { now { $0.kind == .run && $0.lane == lane } }
     /// A step of this kind.
     static func ticked(_ kind: Step.Kind) -> Pred { now { $0.kind == kind } }
-    /// A semantic event with this name; `value` sees its argument.
+    /// A semantic event with this name on any subject; `value` sees its argument.
     static func event(_ name: String, _ value: @escaping @Sendable (Int) -> Bool = { _ in true }) -> Pred {
-        now { $0.kind == .event && $0.event.first == name && $0.event.dropFirst().first.flatMap { Int($0) }.map(value) ?? false }
+        now { $0.kind == .event && $0.event.dropFirst().first == name && $0.event.dropFirst(2).first.flatMap { Int($0) }.map(value) ?? false }
     }
 }
 
