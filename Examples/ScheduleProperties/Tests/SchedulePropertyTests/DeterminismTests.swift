@@ -53,7 +53,13 @@ import Schedules
 /// not a test of our code. "Controlled" means the job ran from our queue
 /// and appears in the trace; "escapes" means the body ran elsewhere and
 /// only its resumption came back to us.
-@Suite struct Reach {
+///
+/// Serialized: each test blocks the cooperative-pool thread it runs on
+/// while waiting for escaped work to come back through that same pool. Run
+/// in parallel on a small runner they hold every pool thread and the
+/// escaped bodies never get one (CI, 2026-08-27: `.stuck` after the full
+/// grace on 3 cores).
+@Suite(.serialized) struct Reach {
     func runs(_ scheduler: Scheduler) -> [String] { scheduler.trace.filter { $0.hasPrefix("run") } }
 
     /// `Task {}` does not inherit the task executor preference: its body
