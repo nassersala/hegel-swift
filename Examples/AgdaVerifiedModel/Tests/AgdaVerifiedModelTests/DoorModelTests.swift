@@ -19,7 +19,7 @@ private enum DoorObservation: String, Codable, Sendable {
     case denied
 }
 
-private struct Cell: Hashable, Sendable {
+private struct Key: Hashable, Sendable {
     let state: DoorState
     let command: DoorCommand
 }
@@ -42,14 +42,14 @@ private struct Artifact: Codable, Sendable {
 
 private struct VerifiedDoorModel: Sendable {
     let artifact: Artifact
-    let table: [Cell: Transition]
+    let table: [Key: Transition]
 
     static func load() throws -> VerifiedDoorModel {
         let url = try #require(
             Bundle.module.url(
                 forResource: "door-model", withExtension: "json", subdirectory: "Fixtures"))
         let artifact = try JSONDecoder().decode(Artifact.self, from: Data(contentsOf: url))
-        let pairs = artifact.transitions.map { (Cell(state: $0.state, command: $0.command), $0) }
+        let pairs = artifact.transitions.map { (Key(state: $0.state, command: $0.command), $0) }
         let table = Dictionary(pairs, uniquingKeysWith: { first, _ in first })
         return VerifiedDoorModel(artifact: artifact, table: table)
     }
@@ -81,59 +81,67 @@ private struct Door: Sendable, CustomStringConvertible {
     }
 }
 
-private struct RefinementMismatch: Error, CustomStringConvertible, Sendable {
-    let state: DoorState
-    let command: DoorCommand
-    let expected: Transition
-    let observed: DoorObservation
-    let actualState: DoorState
-
-    var description: String {
-        "\(state.rawValue) ▸ \(command.rawValue): expected \(expected.observation.rawValue) "
-            + "→ \(expected.next.rawValue), got \(observed.rawValue) → \(actualState.rawValue)"
-    }
+/// The Agda theorem `open-only-when-unlocked`, transported: if the Swift
+/// door refines the table, it inherits the theorem. Checked as an invariant
+/// over the walk so a door that opens while locked violates the theorem,
+/// not only the row.
+private struct TheoremViolated: Error, CustomStringConvertible, Sendable {
+    let name: String
+    var description: String { "theorem \(name) does not hold for the Swift door" }
 }
 
-/// The Agda theorem `open-only-when-unlocked`, transported: if the Swift
-/// door refines the table, it inherits the theorem. Checked directly so a
-/// door that opens while locked violates the theorem, not only the row.
 private struct Drift: Error, CustomStringConvertible, Sendable {
     let door: DoorState
     let model: DoorState
     var description: String { "door is \(door.rawValue), model is \(model.rawValue)" }
 }
 
-private struct TheoremViolated: Error, CustomStringConvertible, Sendable {
-    let name: String
-    var description: String { "theorem \(name) does not hold for the Swift door" }
+extension VerifiedDoorModel {
+    /// The generated table as an `Enumeration`: the only abstract transition
+    /// implementation used by Swift. `problems()` is the completeness check
+    /// on the artifact; `commands(run:)` derives one command per row.
+    var enumeration: Enumeration<DoorState, DoorCommand, DoorObservation> {
+        var table: [DoorState: [DoorCommand: Cell<DoorState, DoorObservation>]] = [:]
+        for t in artifact.transitions {
+            table[t.state, default: [:]][t.command] = .respond(t.observation, then: t.next)
+        }
+        return Enumeration(initial: artifact.initial, table: table)
+    }
 }
 
-/// The generated table is the only abstract transition implementation used
-/// by Swift. Each command lowers to one `Command`: `model:` is a lookup in
-/// the Agda-evaluated table, `post:` compares the SUT's observation and
-/// state with the row and checks the transported theorem.
-private func commands(_ model: VerifiedDoorModel) -> [Command<Door, DoorState>] {
-    DoorCommand.allCases.map { command in
-        Command(
-            command.rawValue,
-            precondition: { model.table[Cell(state: $0, command: command)] != nil },
-            run: { (door: inout Door) -> (observed: DoorObservation, state: DoorState) in
-                (observed: door.run(command), state: door.state)
-            },
-            model: { state in state = model.table[Cell(state: state, command: command)]!.next },
-            post: { before, result in
-                let expected = model.table[Cell(state: before, command: command)]!
-                guard result.observed == expected.observation, result.state == expected.next else {
-                    throw RefinementMismatch(
-                        state: before, command: command, expected: expected,
-                        observed: result.observed, actualState: result.state)
-                }
-                if result.observed == .opened, before != .unlocked {
+/// A door that records its last observation so the theorem can be stated
+/// over the state alone.
+private struct ObservedDoor: Sendable, CustomStringConvertible {
+    var door: Door
+    var last: DoorObservation? = nil
+    var before: DoorState
+    var description: String { door.state.rawValue }
+
+    mutating func run(_ command: DoorCommand) -> DoorObservation {
+        before = door.state
+        last = door.run(command)
+        return last!
+    }
+}
+
+private func forAllDoor(bug: Bool, testCases: UInt64, seed: UInt64? = nil, model: VerifiedDoorModel) throws {
+    let spec = model.enumeration
+    try forAll(
+        sut: Gen { _ in ObservedDoor(door: Door(state: model.artifact.initial, opensWhileLocked: bug), before: model.artifact.initial) },
+        model: spec.initial,
+        commands: spec.commands(run: { d, c in d.run(c) }),
+        consistent: { d, state in
+            guard d.door.state == state else { throw Drift(door: d.door.state, model: state) }
+        },
+        invariants: [
+            Invariant("open-only-when-unlocked") { s in
+                if s.sut.last == .opened, s.sut.before != .unlocked {
                     throw TheoremViolated(name: "open-only-when-unlocked")
                 }
-            },
-            describeObserved: { $0.observed.rawValue })
-    }
+            }
+        ],
+        testCases: testCases, seed: seed, database: "",
+        settings: Settings(statefulStepCount: 12))
 }
 
 @Suite struct AgdaVerifiedModelTests {
@@ -151,47 +159,30 @@ private func commands(_ model: VerifiedDoorModel) -> [Command<Door, DoorState>] 
 
         for state in DoorState.allCases {
             for command in DoorCommand.allCases {
-                #expect(model.table[Cell(state: state, command: command)] != nil)
+                #expect(model.table[Key(state: state, command: command)] != nil)
             }
         }
     }
 
     @Test func correctSwiftDoorRefinesTheVerifiedModel() throws {
         let model = try VerifiedDoorModel.load()
-        try forAll(
-            sut: Gen { _ in Door(state: model.artifact.initial, opensWhileLocked: false) },
-            model: model.artifact.initial,
-            commands: commands(model),
-            consistent: { door, state in
-                guard door.state == state else { throw Drift(door: door.state, model: state) }
-            },
-            testCases: 200,
-            database: "",
-            settings: Settings(statefulStepCount: 12))
+        #expect(model.enumeration.problems().isEmpty)
+        try forAllDoor(bug: false, testCases: 200, model: model)
     }
 
     @Test func buggySwiftDoorShrinksToOneOpenCommand() throws {
         let model = try VerifiedDoorModel.load()
 
         do {
-            try forAll(
-                sut: Gen { _ in Door(state: model.artifact.initial, opensWhileLocked: true) },
-                model: model.artifact.initial,
-                commands: commands(model),
-                testCases: 200,
-                seed: 1,
-                database: "",
-                settings: Settings(statefulStepCount: 12))
+            try forAllDoor(bug: true, testCases: 200, seed: 1, model: model)
             Issue.record("the planted refinement bug was not found")
         } catch let failure as PropertyFailure {
             let counterexample = try #require(failure.failures.first?.counterexample)
-            #expect(counterexample.contains("initial: sut locked, model locked"))
-            #expect(counterexample.components(separatedBy: "  open() -> opened failed").count - 1 == 1)
-            #expect(!counterexample.contains("  lock\n"))
-            #expect(!counterexample.contains("  unlock\n"))
-            #expect(
-                counterexample.contains(
-                    "locked ▸ open: expected denied → locked, got opened → locked"))
+            #expect(counterexample == """
+                initial: sut locked, model locked
+                  locked ▸ open -> opened failed
+                violated: locked ▸ open: observed opened, model expected denied
+                """, "\(counterexample)")
         }
     }
 }

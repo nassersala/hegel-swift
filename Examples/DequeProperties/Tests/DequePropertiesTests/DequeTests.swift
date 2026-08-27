@@ -95,7 +95,7 @@ private let consistent: @Sendable (any DequeLike, [Int]) throws -> Void = { d, m
             #expect(lines.count == 5, "\(trace)")  // initial, 2 pushes, popFirst, violated
             #expect(lines[1].hasPrefix("  push"))
             #expect(lines[2].hasPrefix("  push"))
-            #expect(lines[3].hasPrefix("  popFirst() -> Optional("))
+            #expect(lines[3].hasPrefix("  popFirst -> Optional("))
             #expect(lines[3].hasSuffix(") failed"))
             #expect(lines[4].hasPrefix("violated: popFirst: observed Optional("))
         }

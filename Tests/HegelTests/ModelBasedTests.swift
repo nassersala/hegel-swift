@@ -83,7 +83,7 @@ private let consistent: @Sendable (Queue, [Int]) throws -> Void = { q, m in
             #expect(trace.components(separatedBy: "  push(").count - 1 == 2)
             #expect(!trace.contains("clear"))
             #expect(!trace.contains("count"))
-            #expect(trace.contains("pop() -> Optional("))
+            #expect(trace.contains("pop -> Optional("))
             #expect(trace.contains(") failed"))
             #expect(trace.contains("violated: pop: observed Optional("))
         }
@@ -101,7 +101,7 @@ private let consistent: @Sendable (Queue, [Int]) throws -> Void = { q, m in
         } catch let failure as PropertyFailure {
             let trace = try #require(failure.failures.first?.counterexample)
             #expect(trace.components(separatedBy: "  push(").count - 1 == 2)
-            #expect(trace.contains("  clear()\n"))
+            #expect(trace.contains("  clear\n"))
             #expect(trace.contains("invariant consistent failed"))
             #expect(trace.contains("violated: queue ["))
         }
@@ -139,7 +139,7 @@ private let consistent: @Sendable (Queue, [Int]) throws -> Void = { q, m in
             Issue.record("misuse should be a violation")
         } catch let failure as PropertyFailure {
             let trace = try #require(failure.failures.first?.counterexample)
-            #expect(trace.contains("  bad() failed"))
+            #expect(trace.contains("  bad failed"))
             #expect(trace.contains("assume thrown in run"))
         }
     }

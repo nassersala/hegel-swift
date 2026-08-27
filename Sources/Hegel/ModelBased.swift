@@ -73,7 +73,7 @@ public struct Command<SUT, Model>: Sendable {
         self.precondition = precondition
         self.labeledStep = { state, tc in
             let a = try args(state.model, tc)  // assume propagates: rejection
-            let label = "\(name)(\(describe(a)))"
+            let label = Args.self == Void.self ? name : "\(name)(\(describe(a)))"
             let before = state.model
             let observed: Observed
             do {

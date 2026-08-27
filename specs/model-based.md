@@ -371,21 +371,33 @@ Built as specified, one rename: `Operation` collides with
 consumer did), so the type is `Command<SUT, Model>` and the driver
 parameter is `commands:`. The state is a `Modelled<SUT, Model>` struct
 rather than a labeled tuple so it can print as `sut X, model Y`. Nullary
-steps print as `name()`; argued steps as `name(args)`; observed values as
+steps print as `name`; argued steps as `name(args)`; observed values as
 `name(args) -> value`. `Rule.describeStep` is public; the runner uses an
 internal label-returning step underneath (`LabeledStepFailure` carries the
 label through a throw). Validation order followed: describeStep, then
 `Command` against a queue in the library tests (popsLast shrinks at seed 1
-to `push(0) push(1) pop() -> Optional(1) failed`; a `clear` that leaves one
+to `push(0) push(1) pop -> Optional(1) failed`; a `clear` that leaves one
 element is caught only by `consistent`), then the ports. The Agda door
 consumer went from a hand-rolled `Harness` + `rules(_:)` to `commands(_:)`
 over the same table, and gained the transported theorem
 (`open-only-when-unlocked` checked in `post`); the planted bug shrinks to
-`open() -> opened failed`. `Examples/DequeProperties` checks
+`open -> opened failed`. `Examples/DequeProperties` checks
 swift-collections' `Deque<Int>` against `[Int]` with a model-dependent
 `removeAt` (500 cases pass); a planted popFirst-pops-last wrapper shrinks
-to two pushes and a popFirst. Not done: `Enumeration.operations()`,
-`Laws.abstraction`, the AgentProperties port, `Pool` inside `args`.
+to two pushes and a popFirst. `Enumeration<State, Stimulus, Response>` built the same day
+(`Sources/Hegel/Enumeration.swift`): `Cell` = `.respond(Response, then:)`
+or `.illegal`; switch form (cells evaluated once at init, completeness by
+the compiler) and block form (`problems()`: missing state, missing
+stimulus, undefined next, unreachable); `walk`; `commands(run:equal:)`
+one per legal cell in `allCases` order, named `state ▸ stimulus`. The OTP
+login from the 2026-08-22 experiment is the library test and shrinks at
+seed 1 to exactly the six-step walk. The door consumer now loads its JSON
+into the block form (`problems()` is the artifact completeness check) and
+transports the theorem as an invariant over a SUT that records its last
+observation. Nullary command labels dropped the `()` so cells read
+`Δ ▸ enterPhone -> none`. Not done: `Laws.abstraction`, the
+AgentProperties port (its cells also count fired effects, which needs the
+explicit-post form; not cleaner yet), `Pool` inside `args`.
 
 ## Open questions
 

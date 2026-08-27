@@ -267,11 +267,47 @@ Arguments and applicability depend only on the model; needing the SUT to decide 
 initial: sut Queue([]), model []
   push(0)
   push(1)
-  pop() -> Optional(1) failed
+  pop -> Optional(1) failed
 violated: pop: observed Optional(1), model expected Optional(0)
 ```
 
 Three initializer forms: explicit `post:` over `(modelBefore, args, observed)`; expected-result, where `model:` returns what the SUT must observe under an `equal:` witness (`==` when `Equatable`); and effect-only, checked by `consistent` and the invariants. `HegelError.assume` in `args:` rejects the draw before the SUT runs; from `run:` or `post:` it is reported as misuse, since a reference-typed SUT may already have changed. Commands lower onto the stateful runner (`command.rule()`); plain `Rule`s gain `describeStep:` for argument-bearing trace labels, and `frequency` gives weighted choice among generators. `specs/model-based.md` has the design and its Hughes/Quviq provenance.
+
+## Enumeration: the table is the model
+
+When the states are finite, the model is a table: every canonical state crossed with every stimulus, each cell a response and a next state (Mills's sequence-based enumeration, the Cleanroom "state box"). Written as an exhaustive `switch`, the compiler is the completeness check: delete a cell and it does not compile.
+
+```swift
+let login = Enumeration<Login, Stimulus, Response>(initial: .start) { state, stimulus in
+    switch (state, stimulus) {
+    case (.start, .enterPhone):   .respond(.none, then: .phoneEntered)
+    case (.start, _):             .illegal
+    case (.codeSent, .goodCode):  .respond(.signIn, then: .done)
+    case (.codeSent, .badCode):   .respond(.showError, then: .oneBad)
+    case (.codeSent, .resend):    .respond(.showCodeField, then: .codeSent)  // resend keeps the count
+    case (.twoBad, .badCode):     .respond(.lockOut, then: .locked)          // three bad codes lock
+    // ...every other cell
+    }
+}
+
+try forAll(sut: Gen { _ in LoginScreen() }, model: login.initial,
+           commands: login.commands { screen, stimulus in screen.handle(stimulus) })
+```
+
+`commands(run:)` derives one `Command` per legal cell; `walk(_:from:)` gates a whole plan before it runs; `problems()` checks a table given as blocks (`[State: [Stimulus: Cell]]`, Aaron Hsu's form, or one loaded from a file) for missing cells, undefined next states and unreachable states. A screen whose resend resets the attempt counter shrinks to the six-step walk, and the trace reads as the enumeration:
+
+```
+initial: sut phone/0, model Δ
+  Δ ▸ enterPhone -> none
+  P ▸ send -> showCodeField
+  P.S ▸ badCode -> showError
+  P.S.b ▸ resend -> showCodeField
+  P.S.b ▸ badCode -> showError
+  P.S.b.b ▸ badCode -> showError failed
+violated: P.S.b.b ▸ badCode: observed showError, model expected lockOut
+```
+
+The Agda door example loads its table from the exported JSON into the same type, so a verified finite model and a hand-written one drive the same commands.
 
 ## Example: properties for a real library
 
@@ -542,6 +578,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [x] Laws for swift-async-algorithms `merge`/`zip` on the vendored deterministic validation runtime: generated marble-diagram scripts, per-operator trace-acceptance model, termination-mode law groups, metamorphic translation/swap; `Examples/AsyncProperties` (`specs/async-experiments.md` E1)
 - [x] Schedules as inputs: controlled scheduler on public API, `Schedule` = deviations from depth-first shrinking to a one-line story, byte-stable replay, measured reach (what escapes and what does not); `Examples/ScheduleProperties` (`specs/async-experiments.md` E2a–c)
 - [x] Model-based testing: `Command<SUT, Model>` (args from the model, run, model, post/equal/effect-only forms), `forAll(sut:model:commands:consistent:)`, `Rule.describeStep`, `frequency`; `Examples/DequeProperties` (swift-collections `Deque` vs `[Int]`) and the Agda door consumer both lower onto it (`specs/model-based.md`)
+- [x] Enumeration: `Enumeration<State, Stimulus, Response>` from an exhaustive `switch` (compiler-checked) or blocks (`problems()`-checked); `walk`, `commands(run:)`; OTP login in the library tests, the Agda door consumer loads its JSON into it
 - [x] Agda-verified finite-model experiment: Agda proves properties of one executable transition function and exports its complete table; Hegel checks a separate Swift implementation against it and shrinks a planted refinement bug to one command; `Examples/AgdaVerifiedModel`
 - [ ] Validate against `hegeldev/hegel-core` (the cross-language protocol suite)
 
