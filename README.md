@@ -613,7 +613,7 @@ The same relation, model-checked: `Examples/ScheduleProperties/TLA/Bank.tla` is 
 
 ## Example: Lamport's quicksort, a nondeterministic model
 
-`Examples/Quicksort` is the algorithm from the two slides of Lamport's "Thinking Above the Code" (2014): state `(A, U)`, `U` the set of index ranges still to partition; `Next` picks any range in `U`, any pivot in it, and any element of `Partitions`. Recursion is not part of the algorithm. The three "pick any"s are draws:
+`Examples/Quicksort` is the algorithm from the two slides of Lamport's "Thinking Above the Code" (2014). State `(A, U)`, `U` the set of index ranges still to partition; `Next` picks any range in `U`, any pivot in it, and any element of `Partitions`. Recursion is not part of the algorithm. The three "pick any"s are draws:
 
 ```swift
 public func draw(_ tc: TestCase) throws -> Step {
@@ -621,45 +621,41 @@ public func draw(_ tc: TestCase) throws -> Step {
     let r = ranges[Int(try tc.drawInteger(in: 0...Int64(ranges.count - 1)))]
     if r.b == r.t { return .drop(r) }
     let p = r.b + Int(try tc.drawInteger(in: 0...Int64(r.t - 1 - r.b)))
-    ...  // any element of Partitions(a, p, r.b, r.t): smallest k values left, rest right, each side in a drawn order
+    ...  // any element of Partitions(a, p, r.b, r.t): the k smallest values left, the rest right, each side in a drawn order
     return .partition(r, p: p, after: after)
 }
 ```
 
-So an abstract behaviour is generated data: it replays from the blob and shrinks toward the boring choice (first range, `p = b`, sorted order). `everyBehaviourSorts` checks the relation on drawn arrays and drawn choices; `TLA/Quicksort.tla` is the same relation and TLC checks it exhaustively for `N = 4` over `{0, 1, 2}`: 3,966 states, sorted permutation on `U = {}`, termination under weak fairness.
+An abstract behaviour is generated data: it replays from the blob and shrinks toward the boring choice (first range, `p = b`, sorted order). `everyBehaviourSorts` checks the relation on drawn arrays and drawn choices; `TLA/Quicksort.tla` is the same relation and TLC checks it for `N = 4` over `{0, 1, 2}`: 3,966 states, sorted permutation on `U = {}`, termination under weak fairness.
 
-Refinement is the property only hegel can check. A Hoare-partition recursive quicksort records each partition as a `Step`, and `Lamport.refines` replays the steps against the relation: every step must be enabled, and the run must end with `U` empty. The planted bug is Lomuto's split on Hoare's partition, recursing on `⟨b, p−1⟩` instead of `⟨b, p⟩`:
+Refinement is the property only hegel can check. A Hoare-partition quicksort records each partition as a `Step`; `Lamport.refines` replays the steps against the relation, every step enabled, `U` empty at the end. The planted bug is Lomuto's split on Hoare's partition, recursing on `⟨b, p−1⟩` instead of `⟨b, p⟩`:
 
 ```
 excludePivot: [0, 0] → drop ⟨0, -1⟩
 ```
 
-The first bad step is a range the relation never produced, found before the sort is even wrong.
+A range the relation never produced, found before the output is wrong. Three implementations refine the relation: the recursive one; `worklistQuicksort`, which keeps `U` as a list and takes whatever range `pick` names (depth-first reproduces the recursion's steps exactly, a drawn pick reaches behaviours the recursion never does); and the parallel one, a task per range under the controlled scheduler of `Examples/ScheduleProperties`, where "pick any range" is the scheduler's choice of which task runs next. Steps on disjoint ranges are independent; over 100 schedules, 57 step sequences and one equivalence class, the recursive quicksort's. That needed one change to the model: a partition step records `A′[b...t]`, the slice it touched, not the whole array. With the whole array, steps on disjoint ranges were independent in effect and different as data (17 classes). An event carries what the step observed.
 
-Recursion is one implementation, not the algorithm. `worklistQuicksort` keeps `U` as a list and takes any range `pick` names: with the default depth-first pick its steps are the recursive quicksort's exactly, and with a drawn pick it produces behaviours the recursion never does. Both refine the same relation; that is the sense in which the recursive version's behaviours are a subset of the relation's.
+A nondeterministic model chooses its successor by drawing it — `concurrency-semantics.md` asks how; this is the answer — and a deterministic implementation refines it by being one of its behaviours.
 
-The worklist is also the parallel quicksort: one task per range, `U` the set of live tasks, and "pick any range" is the scheduler's choice of which task runs next. Under the controlled scheduler of `Examples/ScheduleProperties`, with the schedule drawn by hegel, every schedule's step sequence refines the relation. Two steps are independent iff their ranges are disjoint; over 100 schedules, 57 distinct step sequences and one equivalence class, the recursive quicksort's. That took one change to the model: a partition step records `A′[b...t]`, the slice it touched, not the whole array — with the whole array, steps on disjoint ranges differed as data (17 classes) while being independent in effect. The event carries what the step observes.
+### Sorting as a lattice
 
-### Sorting as a lattice: the propagator version
-
-`Order.swift` is the other reading of quicksort, the one where nothing moves. The cell holds what is known about the order — pairs `i ≤ j` over indices, closed under transitivity — and the join is union then closure: a bounded semilattice, so `Laws.semilattice` is the whole CRDT contract. A propagator is a comparison step that learns pairs. Quicksort and mergesort are two ways of choosing which comparisons to make:
+`Order.swift` is the other reading of quicksort, where nothing moves. The cell holds what is known about the order, pairs `i ≤ j` over indices, closed under transitivity; join is union then closure, a bounded semilattice, so `Laws.semilattice` is the whole CRDT contract. A propagator is a comparison step that learns pairs. Quicksort and mergesort are two ways of choosing which comparisons to make:
 
 ```swift
 Propagators.quicksort(values)   // three-way partition of an index set: L×E ∪ L×R ∪ E×R ∪ E×E, then L and R
 Propagators.mergesort(values)   // split in half: the cross pairs of the halves, then each half
 ```
 
-Every pair of indices is separated at exactly one node of either tree, so both reach the true order, and the sorted array is read off it. Checked: each propagator's fact lies inside the true order (sound) and joining it never leaves it (monotone); both fixpoints equal `Order.of(values)`; and confluence as a schedule property — one task per propagator under the controlled scheduler, the schedule and a set of redeliveries drawn by hegel, one fixpoint. Over 50 schedules: 24 distinct firing orders, 1 fixpoint.
+Every pair of indices is separated at exactly one node of either tree, so both reach the true order and the sorted array is read off it. Checked: each fact lies inside the true order and joining it never leaves it; both fixpoints equal `Order.of(values)`; and confluence as a schedule property, a task per propagator under the controlled scheduler, the schedule and a set of redeliveries drawn, one fixpoint. Over 50 schedules: 24 firing orders, one fixpoint. The lattice on the order rather than on positions is what lets mergesort in: its merge learns pairs like any other comparison. The first counterexample hegel found here was `[0, 0]`, the reflexive pair `(i, i)` from a three-way partition's `E×E`.
 
-This is Sussman and Radul's propagator model over an LVar-style lattice (Kuper), and "monotone, so any order and any redelivery" is the CALM theorem, not a discovery; the example's claim is only that the two sorts are two propagator sets over one cell type, and that hegel can check the laws, the soundness, and the confluence of a concrete one. The lattice on the *order* rather than on positions-per-element is what lets mergesort in: its merge learns pairs like any other comparison. And it is a different algorithm from Lamport's relation, which moves data; the first counterexample hegel found here was the reflexive pair `(i, i)` from a three-way partition's `E×E`, shrunk to `[0, 0]`.
+The two readings meet. Tag each value with its index so the moving-data algorithm keeps identity, and a Lamport partition step is a fact: the elements that landed left are ≤ the elements that landed right. Every behaviour of the relation, and the recursive and parallel quicksorts under every schedule, project to propagator runs whose fixpoint is inside the true order, total, and equal to it when values are distinct. The algorithm that moves data refines the one that accumulates knowledge.
 
-The two readings meet. Tag each value with its index so the moving-data algorithm keeps identity, and a Lamport partition step *is* a fact — the elements that landed left are ≤ the elements that landed right. Every behaviour of the relation, and the recursive and parallel quicksorts under every schedule, project to propagator runs whose fixpoint is inside the true order, total, and equal to it when values are distinct. The algorithm that moves data refines the one that accumulates knowledge.
+Threshold reads (Kuper's LVars) make the lattice version a real algorithm and bring liveness back. A mergesort node waits until the cell is total on each half, then merges with at most `|l| + |r| − 1` comparisons and learns only the pairs it compared; the closure supplies the rest. Cost drops from O(n²) pairs to at most `n⌈log₂ n⌉` comparisons, checked under every drawn schedule. Blocking makes deadlock possible: drop any non-root node and every schedule ends `.stuck`, its parent waiting for a threshold nobody will reach. Drop the root and nobody waits: the run completes knowing the two halves and never their order.
 
-Threshold reads (Kuper's LVars) make the lattice version a real algorithm and bring liveness back. A mergesort node waits until the cell is total on each of its halves, then merges with at most `|l| + |r| − 1` comparisons, learning only the pairs it compared; the closure supplies the rest. Cost drops from O(n²) pairs to at most `n⌈log₂ n⌉` comparisons, checked under every drawn schedule. And blocking makes deadlock possible: drop any non-root node and every schedule ends `.stuck`, its parent waiting for a threshold nobody will reach — the liveness counterexample that a finite trace can show, where `TemporalLogic` can only state the safety half. Drop the root and nobody waits: the run completes knowing the two halves and never their order.
+hegel found a bug in the cell. A read that must wait is two jobs on the actor, the threshold check and then the body of `withCheckedContinuation`, which runs as its own job after the task suspends; a `join` can run between them. On `[0, 0, 0, 0, 0, 0]` the schedule "at choice point 4 run ready[1]; 6: ready[1]; 7: ready[1]" put the `[1]|[2]` merge's join between the check and the registration of `[0]|[1, 2]`'s read: a lost wakeup, `.stuck` at 25 steps, deterministic under that schedule. The fix is to re-check inside the continuation body; the schedule stays as a regression test.
 
-hegel also found a bug in the cell itself. A read that must wait is two jobs on the actor — the threshold check, then the body of `withCheckedContinuation`, which runs as its own job after the task suspends — and a `join` can run between them. On `[0, 0, 0, 0, 0, 0]` the schedule "at choice point 4 run ready[1]; 6: ready[1]; 7: ready[1]" put the `[1]|[2]` merge's join between the check and the registration of `[0]|[1, 2]`'s read: a lost wakeup, stuck at 25 steps, deterministic under that schedule. The fix is the standard one, re-check inside the continuation body; the schedule stays as a regression test.
-
-A nondeterministic model chooses its successor by drawing it — `concurrency-semantics.md` asks how; this is the answer — and a deterministic implementation refines it by being one of its behaviours.
+This is Sussman and Radul's propagator model over an LVar-style lattice, and "monotone, so any order and any redelivery" is the CALM theorem. The example's claim is smaller: two sorts are two propagator sets over one cell type, and the laws, the soundness, the confluence, the cost, the deadlock and the lost wakeup are all properties hegel checks.
 
 ## Example: laws that fail for a reason
 
