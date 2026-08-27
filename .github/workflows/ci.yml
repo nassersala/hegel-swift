@@ -45,6 +45,8 @@ jobs:
         run: swift test --package-path Examples/DequeProperties
       - name: Test example (Quicksort)
         run: swift test --package-path Examples/Quicksort
+      - name: Test example (TwoPhaseCommit)
+        run: swift test --package-path Examples/TwoPhaseCommit
       - name: Test example (AgdaVerifiedModel)
         run: swift test --package-path Examples/AgdaVerifiedModel
       - name: Install Lean (elan)

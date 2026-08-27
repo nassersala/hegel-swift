@@ -668,6 +668,39 @@ hegel found a bug in the cell. A read that must wait is two jobs on the actor, t
 
 This is Sussman and Radul's propagator model over an LVar-style lattice, and "monotone, so any order and any redelivery" is the CALM theorem. The example's claim is smaller: two sorts are two propagator sets over one cell type, and the laws, the soundness, the confluence, the cost, the deadlock and the lost wakeup are all properties hegel checks.
 
+## Example: two-phase commit, faults as a second schedule
+
+`Examples/TwoPhaseCommit` runs a coordinator and n participants on the controlled scheduler, through a `Network` whose faults hegel draws and shrinks the way it draws schedules: a `Faults` list of `drop` or `duplicate` by message index, empty meaning reliable. Reordering is not a fault, because every delivery is its own job and the schedule already orders deliveries. Votes are a drawn `[Bool]`; the schedule is a `Schedule` or a `PCT`. The coordinator times out on missing votes on the fake clock and aborts; a prepared participant that hears nothing queries the coordinator, a bounded number of times, then reports itself `blocked`.
+
+The properties are Lamport's `TCommit` invariants as formulas over the event trace, plus the liveness surrogate:
+
+```swift
+static let agreement: Pred<Event> = always(now { Set($0.decisions.values).count <= 1 })
+static func validity(_ n: Int) -> Pred<Event> {
+    always(now { e in !e.decisions.values.contains(.commit) || (e.votes.count == n && e.votes.values.allSatisfy { $0 }) })
+}
+static let everyoneDecides: Pred<Event> = now { $0.blocked.isEmpty }
+```
+
+Safety holds on every vote vector, fault list and schedule, uniform or PCT. Liveness has the protocol's known counterexample. With the coordinator set to crash after collecting the votes, hegel fails `everyoneDecides` and shrinks to the bare story: one participant, voting yes, reliable network, default schedule:
+
+```
+p0 vote yes
+c crash
+p0 query
+p0 query
+p0 query
+p0 query
+p0 query
+p0 blocked
+```
+
+`TLA/TwoPhase.tla`, after Lamport's, with a `Crash` constant: without it TLC finds 288 states, consistent and terminating; with it TLC's deadlock trace ends in the same state, every participant prepared and the coordinator crashed.
+
+Two seeded bugs shrink to their textbook shapes. Commit-on-timeout, where the coordinator times out and commits if every vote it did receive was yes, shrinks to one participant voting no with its `prepare` dropped: the coordinator times out with zero votes, all of them yes. Heuristic abort, where a participant gives up and aborts on its own, shrinks to two drops, the participant's decision and its query, and a run where the coordinator and the others committed.
+
+The example also found a bug in its own first coordinator. `decide` was `async` and checked `decision == nil` after being called with `await` from `receive`; the PCT schedule ran the other participant's vote at that `await`, so a `no` was recorded, a commit was decided on the later `yes`, and the abort found the decision already taken. Uniform schedules did not reach it in 300 runs; PCT did in 200. The fix is the withdrawal fix, take the decision before the first `await`.
+
 ## Example: laws that fail for a reason
 
 `Examples/ComplexProperties` runs the catalog on swift-numerics' `Complex<Double>` with `equal:` = the library's own `isApproximatelyEqual` — relative tolerance, no absolute part: it accepts rounding and rejects cancellation, so what fails below fails because ℂ over doubles is not a field, not because the tolerance is ours. Inputs are log-uniform across fifteen decades (a mantissa in ±10 at a scale from 1e−12 to 1e3). Under that: `*` is a commutative monoid, `+` is commutative with identity 0, `z · (1/z) = 1` away from 0, `*` distributes over `+`, `|zw| = |z||w|`, conjugation is a ring automorphism and an involution (exactly), `exp(a + b) = exp(a) exp(b)`, `exp(iθ) = cos θ + i sin θ`, polar form round-trips.
