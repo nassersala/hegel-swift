@@ -640,6 +640,19 @@ Recursion is one implementation, not the algorithm. `worklistQuicksort` keeps `U
 
 The worklist is also the parallel quicksort: one task per range, `U` the set of live tasks, and "pick any range" is the scheduler's choice of which task runs next. Under the controlled scheduler of `Examples/ScheduleProperties`, with the schedule drawn by hegel, every schedule's step sequence refines the relation. Two steps are independent iff their ranges are disjoint; over 100 schedules, 57 distinct step sequences and one equivalence class, the recursive quicksort's. That took one change to the model: a partition step records `A′[b...t]`, the slice it touched, not the whole array — with the whole array, steps on disjoint ranges differed as data (17 classes) while being independent in effect. The event carries what the step observes.
 
+### Sorting as a lattice: the propagator version
+
+`Order.swift` is the other reading of quicksort, the one where nothing moves. The cell holds what is known about the order — pairs `i ≤ j` over indices, closed under transitivity — and the join is union then closure: a bounded semilattice, so `Laws.semilattice` is the whole CRDT contract. A propagator is a comparison step that learns pairs. Quicksort and mergesort are two ways of choosing which comparisons to make:
+
+```swift
+Propagators.quicksort(values)   // three-way partition of an index set: L×E ∪ L×R ∪ E×R ∪ E×E, then L and R
+Propagators.mergesort(values)   // split in half: the cross pairs of the halves, then each half
+```
+
+Every pair of indices is separated at exactly one node of either tree, so both reach the true order, and the sorted array is read off it. Checked: each propagator's fact lies inside the true order (sound) and joining it never leaves it (monotone); both fixpoints equal `Order.of(values)`; and confluence as a schedule property — one task per propagator under the controlled scheduler, the schedule and a set of redeliveries drawn by hegel, one fixpoint. Over 50 schedules: 24 distinct firing orders, 1 fixpoint.
+
+This is Sussman and Radul's propagator model over an LVar-style lattice (Kuper), and "monotone, so any order and any redelivery" is the CALM theorem, not a discovery; the example's claim is only that the two sorts are two propagator sets over one cell type, and that hegel can check the laws, the soundness, and the confluence of a concrete one. The lattice on the *order* rather than on positions-per-element is what lets mergesort in: its merge learns pairs like any other comparison. And it is a different algorithm from Lamport's relation, which moves data; the first counterexample hegel found here was the reflexive pair `(i, i)` from a three-way partition's `E×E`, shrunk to `[0, 0]`.
+
 A nondeterministic model chooses its successor by drawing it — `concurrency-semantics.md` asks how; this is the answer — and a deterministic implementation refines it by being one of its behaviours.
 
 ## Example: laws that fail for a reason
