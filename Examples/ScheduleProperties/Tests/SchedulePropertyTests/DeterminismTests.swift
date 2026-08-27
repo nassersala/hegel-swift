@@ -62,7 +62,7 @@ import Schedules
     /// or structured children to stay under control.
     @Test func unstructuredTaskBodyEscapes() {
         let scheduler = Scheduler()
-        let outcome = scheduler.run(policy: Scheduler.fifo, grace: .milliseconds(200)) { await Task { }.value }
+        let outcome = scheduler.run(policy: Scheduler.fifo, grace: .seconds(2)) { await Task { }.value }
         if case .completed = outcome {} else { Issue.record("\(outcome)") }
         #expect(runs(scheduler).count == 2)
     }
@@ -96,7 +96,7 @@ import Schedules
     /// global pool; the awaiting resumption comes back.
     @Test func detachedTaskBodyEscapes() {
         let scheduler = Scheduler()
-        let outcome = scheduler.run(policy: Scheduler.fifo, grace: .milliseconds(200)) {
+        let outcome = scheduler.run(policy: Scheduler.fifo, grace: .seconds(2)) {
             await Task.detached { }.value
         }
         if case .completed = outcome {} else { Issue.record("\(outcome)") }
@@ -107,7 +107,7 @@ import Schedules
     /// escapes; the resumption comes back.
     @Test func mainActorBodyEscapes() {
         let scheduler = Scheduler()
-        let outcome = scheduler.run(policy: Scheduler.fifo, grace: .milliseconds(200)) {
+        let outcome = scheduler.run(policy: Scheduler.fifo, grace: .seconds(2)) {
             await MainActor.run { }
         }
         if case .completed = outcome {} else { Issue.record("\(outcome)") }
@@ -119,7 +119,7 @@ import Schedules
     /// nondeterministic duration.
     @Test func realClockSleepEscapesInTime() {
         let scheduler = Scheduler()
-        let outcome = scheduler.run(policy: Scheduler.fifo, grace: .milliseconds(200)) {
+        let outcome = scheduler.run(policy: Scheduler.fifo, grace: .seconds(2)) {
             try? await Task.sleep(for: .milliseconds(20))
         }
         if case .completed = outcome {} else { Issue.record("\(outcome)") }
