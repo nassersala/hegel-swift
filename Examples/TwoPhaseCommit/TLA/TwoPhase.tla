@@ -1,12 +1,18 @@
 ------------------------------ MODULE TwoPhase ------------------------------
-(* Two-phase commit as in Lamport's TwoPhase.tla (the TLA+ video course),
-   with the network as a set of messages that may be delivered in any
-   order and never lost, plus one more thing Examples/TwoPhaseCommit
-   exercises: the coordinator may crash after collecting every vote and
-   before deciding (Crash = TRUE). Participants that voted yes then wait
-   forever: consistency holds, termination does not. Swift's faults
-   (drops, duplicates) and its timeout-abort are not modelled here; TLC
-   checks the protocol, hegel checks the code. *)
+(* Two-phase commit after Lamport's TwoPhase.tla (TLA+ video course,
+   lecture 6; TCommit.tla alongside is his, verbatim), with the network as
+   a set of messages that may be delivered in any order and never lost,
+   plus one thing Examples/TwoPhaseCommit exercises: the coordinator may
+   crash after collecting every vote and before deciding (Crash = TRUE).
+   Participants that voted yes then wait forever: consistency holds,
+   termination does not. Swift's faults (drops, duplicates) and its
+   timeout-abort are not modelled here.
+
+   The property that matters is his theorem: this module implements
+   TCommit, TC!TCSpec below, under the mapping that keeps rmState and
+   forgets tmState, tmPrepared and msgs. TLC checks it of the protocol;
+   hegel checks the same refinement of the Swift code, step by step,
+   in TCommit.swift. *)
 EXTENDS Integers
 
 CONSTANTS RM, Crash
@@ -95,4 +101,9 @@ Consistent ==
 (* Every participant decides. Holds without the crash; with it, TLC's
    counterexample is the blocked state. *)
 Termination == <>Done
+
+TC == INSTANCE TCommit
+TCSpec == TC!TCSpec
+
+THEOREM Spec => TCSpec
 =============================================================================

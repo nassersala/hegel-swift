@@ -181,6 +181,12 @@ public struct Run: Sendable {
     public var participants: [Participant.Phase]
     public var network: [String]
     public var choices: [Scheduler.Choice]
+    /// The run as `TCommit` steps, under the refinement mapping.
+    public var steps: [TCommit.Step] { TCommit.project(events) }
+    /// Does the run refine `TCommit`?
+    public var refinement: (violation: TCommit.Violation?, final: TCommit.State) {
+        TCommit.refines(steps, rms: participants.indices.map { "p\($0)" })
+    }
 }
 
 public func twoPhaseCommit(votes: [Bool], faults: Faults = Faults(), bug: Bug? = nil, crashAfterVotes: Bool = false, retries: Int = 5, policy: @escaping Scheduler.Policy, maxSteps: Int = 10_000) -> Run {

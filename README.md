@@ -668,36 +668,37 @@ hegel found a bug in the cell. A read that must wait is two jobs on the actor, t
 
 This is Sussman and Radul's propagator model over an LVar-style lattice, and "monotone, so any order and any redelivery" is the CALM theorem. The example's claim is smaller: two sorts are two propagator sets over one cell type, and the laws, the soundness, the confluence, the cost, the deadlock and the lost wakeup are all properties hegel checks.
 
-## Example: two-phase commit, faults as a second schedule
+## Example: transaction commit, and two-phase commit as its implementation
 
-`Examples/TwoPhaseCommit` runs a coordinator and n participants on the controlled scheduler, through a `Network` whose faults hegel draws and shrinks the way it draws schedules: a `Faults` list of `drop` or `duplicate` by message index, empty meaning reliable. Reordering is not a fault, because every delivery is its own job and the schedule already orders deliveries. Votes are a drawn `[Bool]`; the schedule is a `Schedule` or a `PCT`. The coordinator times out on missing votes on the fake clock and aborts; a prepared participant that hears nothing queries the coordinator, a bounded number of times, then reports itself `blocked`.
-
-The properties are Lamport's `TCommit` invariants as formulas over the event trace, plus the liveness surrogate:
+Lamport's TLA+ course states transaction commit before two-phase commit. `TCommit` is the specification: resource managers, each `working`, `prepared`, `committed` or `aborted`; `Prepare(rm)` for a working one; `Decide(rm)` commits a prepared one only if every RM is prepared or committed, and aborts a working or prepared one only if none has committed. No coordinator, no messages. Two-phase commit is one implementation, and its theorem is `TPSpec ⇒ TC!TCSpec`: every behaviour of the protocol is a behaviour of the specification once the coordinator's state and the messages are forgotten. `Examples/TwoPhaseCommit` takes the same order. `TCommit.swift` is the specification as a next-state relation, the `Lamport.refines` shape of the quicksort example:
 
 ```swift
-static let agreement: Pred<Event> = always(now { Set($0.decisions.values).count <= 1 })
-static func validity(_ n: Int) -> Pred<Event> {
-    always(now { e in !e.decisions.values.contains(.commit) || (e.votes.count == n && e.votes.values.allSatisfy { $0 }) })
+public static func next(_ s: State, _ step: Step) -> State? {
+    switch step {
+    case .prepare(let rm):        guard s.rmState[rm] == .working else { return nil }; ...
+    case .decide(let rm, .commit): guard s.rmState[rm] == .prepared, s.canCommit else { return nil }; ...
+    case .decide(let rm, .abort):  guard s.rmState[rm] is working or prepared, s.notCommitted else { return nil }; ...
+    }
 }
-static let everyoneDecides: Pred<Event> = now { $0.blocked.isEmpty }
 ```
 
-Safety holds on every vote vector, fault list and schedule, uniform or PCT. Liveness has the protocol's known counterexample. With the coordinator set to crash after collecting the votes, hegel fails `everyoneDecides` and shrinks to the bare story: one participant, voting yes, reliable network, default schedule:
+The implementation runs a coordinator and n participants on the controlled scheduler, through a `Network` whose faults hegel draws and shrinks the way it draws schedules: a `Faults` list of `drop` or `duplicate` by message index, empty meaning reliable. Reordering is not a fault, because every delivery is its own job and the schedule already orders deliveries. Votes are a drawn `[Bool]`; the schedule is a `Schedule` or a `PCT`. The coordinator times out on missing votes on the fake clock and aborts; a prepared participant that hears nothing queries the coordinator, a bounded number of times, then reports itself `blocked`.
+
+The property is the theorem, checked of the code: the run's event trace is projected to `TCommit` steps under the refinement mapping (`p0 vote yes` is `Prepare(p0)`, `p0 decide commit` is `Decide(p0, commit)`, the coordinator's and the network's events project to nothing, as `tmState`, `tmPrepared` and `msgs` are forgotten in the TLA+), and every step must be enabled from the state so far. Agreement and validity are corollaries and stay as named formulas. `TLA/TwoPhase.tla` is after Lamport's, with his `TCommit.tla` alongside verbatim and `TC == INSTANCE TCommit`; TLC checks `TCSpec` of the protocol over 288 states, hegel checks it of the code under every vote vector, fault list and schedule, uniform or PCT.
+
+Liveness is where the protocol has its known counterexample, and `TCommit` says nothing about it. With the coordinator set to crash after collecting the votes, `everyoneDecides` fails and hegel shrinks to the bare story, one participant voting yes, reliable network, default schedule, `p0 vote yes / c crash / p0 query ×5 / p0 blocked`; with `Crash = TRUE` TLC's deadlock trace ends in the same state. The refinement holds through the crash.
+
+Seeded bugs are reported by the specification, as the step that is not enabled. Commit-on-timeout, where the coordinator times out and commits if every vote it did receive was yes, shrinks to one participant whose `prepare` was dropped:
 
 ```
-p0 vote yes
-c crash
-p0 query
-p0 query
-p0 query
-p0 query
-p0 query
-p0 blocked
+step 0 Decide(p0, commit) is not enabled in [p0: working]
 ```
 
-`TLA/TwoPhase.tla`, after Lamport's, with a `Crash` constant: without it TLC finds 288 states, consistent and terminating; with it TLC's deadlock trace ends in the same state, every participant prepared and the coordinator crashed.
+Heuristic abort, where a participant gives up and aborts on its own, shrinks to two drops, its decision and its query:
 
-Two seeded bugs shrink to their textbook shapes. Commit-on-timeout, where the coordinator times out and commits if every vote it did receive was yes, shrinks to one participant voting no with its `prepare` dropped: the coordinator times out with zero votes, all of them yes. Heuristic abort, where a participant gives up and aborts on its own, shrinks to two drops, the participant's decision and its query, and a run where the coordinator and the others committed.
+```
+step 5 Decide(p0, abort) is not enabled in [p0: prepared, p1: committed, p2: committed]
+```
 
 The example also found a bug in its own first coordinator, twice. `receive` recorded the vote and called `await decide(.abort)`, and `decide` checked `decision == nil`. The PCT schedule showed that the `await` on a same-actor method is a suspension point: the call was enqueued as a new job on the coordinator (`#15@c` in the trace), the other participant's `yes` ran in between, `decide(.commit)` was enqueued too and ran first, and the abort found the decision taken. Uniform schedules did not reach it in 300 runs; PCT did in 200. Moving the check inside `decide` did not fix it, since the suspension is before `decide` runs, and the next run found the same trace. The fix is the withdrawal fix, taken literally: the check and the write happen synchronously at the call site, and only the broadcast awaits. The three schedules that found it are the regression test.
 
@@ -818,6 +819,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - Erik Meijer, *Guardians of the Agents: Formal Verification of AI Workflows* (CACM 69(1), 2026, DOI 10.1145/3777544) — generate, verify, then execute; `VerifiedWorkflow` · Mills, Dyer, Linger, *Cleanroom Software Engineering* (IEEE Software 1987) · Prowell & Poore, *Foundations of Sequence-Based Software Specification* (IEEE TSE 2003) — the enumeration table · John Hughes, *How to Specify It!* (TFP 2019) — model-based properties as the strongest kind; the shape of `Examples/AgentProperties`
 - Alzahrani, Spichkova, Harland, [*Application of property-based testing tools for metamorphic testing*](https://arxiv.org/abs/2211.12003) (2022) — metamorphic testing as a kind of PBT, the stance `forAll(source:relations:subject:)` takes
 - Burckhardt, Kothari, Musuvathi, Nagarakatte, *A Randomized Scheduler with Probabilistic Guarantees of Finding Bugs* (ASPLOS 2010) — PCT; `Schedules.PCT`
+- Leslie Lamport, [*The TLA+ Video Course*](https://lamport.azurewebsites.net/video/videos.html), lectures 5–6, `TCommit.tla` and `TwoPhase.tla` — the specification and its implementation; `Examples/TwoPhaseCommit`
 
 ## Crafted By:
 Nasser Ali Alzahrani [@nassersala](http://twitter.com/nassersala)

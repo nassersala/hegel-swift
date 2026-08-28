@@ -23,7 +23,8 @@ extension Scheduled { @Suite struct TwoPhase {
         array(of: Gen<Int64>.int(in: 0...30).map(Int.init), count: 0...2)
     ).map { PCT(priorities: $0, changePoints: $1) }
 
-    // Lamport's TCommit invariants over the event trace.
+    // Corollaries of TCommit, as formulas over the event trace. The
+    // refinement (`refines`) is the property; these name what it implies.
     /// No two nodes decide differently.
     static let agreement: Pred<Event> = always(now { Set($0.decisions.values).count <= 1 })
     /// A commit needs every participant's yes; a no never precedes a commit.
@@ -34,6 +35,13 @@ extension Scheduled { @Suite struct TwoPhase {
     }
     /// Everyone decides, nobody is left blocked: the liveness surrogate.
     static let everyoneDecides: Pred<Event> = now { $0.blocked.isEmpty }
+
+    /// The top property: every run refines `TCommit`, step by step.
+    static func refines(_ run: Run) throws {
+        if let v = run.refinement.violation {
+            throw RefinementViolation(violation: v, steps: run.steps, trace: run.trace, network: run.network)
+        }
+    }
 
     static func check(_ name: String, _ formula: Pred<Event>, over run: Run) throws {
         if let i = firstFailure(of: formula, over: run.events) {
@@ -49,6 +57,7 @@ extension Scheduled { @Suite struct TwoPhase {
             guard case .completed = run.outcome else { Issue.record("\(run.outcome)"); return }
             #expect(run.coordinator == (votes.allSatisfy { $0 } ? .commit : .abort))
             #expect(run.participants.allSatisfy { $0 == (votes.allSatisfy { $0 } ? .committed : .aborted) })
+            #expect(throws: Never.self) { try Self.refines(run) }
             #expect(throws: Never.self) { try Self.check("agreement", Self.agreement, over: run) }
             #expect(throws: Never.self) { try Self.check("validity", Self.validity(votes.count), over: run) }
             #expect(throws: Never.self) { try Self.check("everyone decides", Self.everyoneDecides, over: run.lastState) }
@@ -63,6 +72,7 @@ extension Scheduled { @Suite struct TwoPhase {
         expectAll(Hegel.zip(Self.votes, Self.faults, Self.schedules), testCases: 300, database: "") { votes, faults, schedule in
             let run = twoPhaseCommit(votes: votes, faults: faults, policy: schedule.policy)
             guard case .completed = run.outcome else { Issue.record("\(run.outcome) under \(faults)"); return }
+            #expect(throws: Never.self) { try Self.refines(run) }
             #expect(throws: Never.self) { try Self.check("agreement", Self.agreement, over: run) }
             #expect(throws: Never.self) { try Self.check("validity", Self.validity(votes.count), over: run) }
             #expect(throws: Never.self) { try Self.check("everyone decides", Self.everyoneDecides, over: run.lastState) }
@@ -75,7 +85,7 @@ extension Scheduled { @Suite struct TwoPhase {
         expectAll(Hegel.zip(Self.votes, Self.faults, Self.pct), testCases: 200, database: "") { votes, faults, pct in
             let run = twoPhaseCommit(votes: votes, faults: faults, policy: pct.policy)
             guard case .completed = run.outcome else { Issue.record("\(run.outcome)"); return }
-            #expect(throws: Never.self) { try Self.check("agreement", Self.agreement, over: run) }
+            #expect(throws: Never.self) { try Self.refines(run) }
             let replay = twoPhaseCommit(votes: votes, faults: faults, policy: Schedule(explaining: run.choices).policy)
             #expect(replay.trace == run.trace)
         }
@@ -87,8 +97,7 @@ extension Scheduled { @Suite struct TwoPhase {
     @Test func regressionDecideAtTheCallSite() throws {
         for schedule in [PCT(changePoints: [7, 0]).policy, PCT(changePoints: [16, 7]).policy, Schedule(deviations: [.init(choice: 0, index: 0), .init(choice: 7, index: 0)]).policy] {
             let run = twoPhaseCommit(votes: [false, true], policy: schedule)
-            try Self.check("agreement", Self.agreement, over: run)
-            try Self.check("validity", Self.validity(2), over: run)
+            try Self.refines(run)
             #expect(run.coordinator == .abort)
         }
     }
@@ -102,7 +111,7 @@ extension Scheduled { @Suite struct TwoPhase {
         do {
             try forAll(Hegel.zip(Self.votes, Self.faults, Self.schedules), seed: 3, database: "") { votes, faults, schedule in
                 let run = twoPhaseCommit(votes: votes, faults: faults, crashAfterVotes: true, policy: schedule.policy)
-                try Self.check("agreement", Self.agreement, over: run)
+                try Self.refines(run)
                 try Self.check("everyone decides", Self.everyoneDecides, over: run.lastState)
             }
             Issue.record("the blocking case was not found")
@@ -120,14 +129,14 @@ extension Scheduled { @Suite struct TwoPhase {
     }
 
     /// Seeded bug: commit on timeout. The shrunk counterexample is one
-    /// participant voting no whose vote is dropped: the coordinator times
-    /// out with no votes, all of which are yes, and commits.
-    @Test func commitOnTimeoutShrinksToOneDroppedNo() throws {
+    /// participant whose `prepare` is dropped: the coordinator times out
+    /// with no votes, all of which are yes, and commits. The report is
+    /// the spec's: `Decide(p0, commit)` is not enabled, p0 is working.
+    @Test func commitOnTimeoutShrinksToOneDroppedPrepare() throws {
         do {
             try forAll(Hegel.zip(Self.votes, Self.faults, Self.schedules), seed: 5, database: "") { votes, faults, schedule in
                 let run = twoPhaseCommit(votes: votes, faults: faults, bug: .commitOnTimeout, policy: schedule.policy)
-                try Self.check("agreement", Self.agreement, over: run)
-                try Self.check("validity", Self.validity(votes.count), over: run)
+                try Self.refines(run)
             }
             Issue.record("the bug was not found")
         } catch let failure as PropertyFailure {
@@ -137,8 +146,10 @@ extension Scheduled { @Suite struct TwoPhase {
             #expect(faults.faults.count == 1 && faults.faults.first?.kind == .drop)
             #expect(schedule == Schedule())
             let run = twoPhaseCommit(votes: votes, faults: faults, bug: .commitOnTimeout, policy: schedule.policy)
-            print("commit on timeout: votes \(votes), \(faults), \(schedule)\n" + run.network.joined(separator: "\n") + "\n" + run.events.map(\.description).joined(separator: "\n"))
-            #expect(throws: Violation.self) { try Self.check("validity", Self.validity(votes.count), over: run) }
+            let v = try #require(run.refinement.violation)
+            #expect(v.step == .decide("p0", .commit))
+            #expect(v.state.rmState["p0"] == .working)
+            print("commit on timeout: votes \(votes), \(faults), \(schedule)\n\(v)\n" + run.network.joined(separator: "\n"))
         }
     }
 
@@ -151,7 +162,7 @@ extension Scheduled { @Suite struct TwoPhase {
         do {
             try forAll(Hegel.zip(Self.votes, Self.faults, Self.schedules), testCases: 500, seed: 2, database: "") { votes, faults, schedule in
                 let run = twoPhaseCommit(votes: votes, faults: faults, bug: .heuristicAbort, retries: 1, policy: schedule.policy)
-                try Self.check("agreement", Self.agreement, over: run)
+                try Self.refines(run)
             }
             Issue.record("the bug was not found")
         } catch let failure as PropertyFailure {
@@ -160,8 +171,10 @@ extension Scheduled { @Suite struct TwoPhase {
             #expect(votes.allSatisfy { $0 })
             #expect(faults.faults.count == 2 && faults.faults.allSatisfy { $0.kind == .drop })
             let run = twoPhaseCommit(votes: votes, faults: faults, bug: .heuristicAbort, retries: 1, policy: schedule.policy)
-            print("heuristic abort: votes \(votes), \(faults), \(schedule)\n" + run.network.joined(separator: "\n") + "\n" + run.events.map(\.description).joined(separator: "\n"))
-            #expect(run.coordinator == .commit && run.participants.contains(.aborted))
+            let v = try #require(run.refinement.violation)
+            if case .decide(_, .abort) = v.step {} else { Issue.record("\(v)") }
+            #expect(!v.state.notCommitted)
+            print("heuristic abort: votes \(votes), \(faults), \(schedule)\n\(v)\n" + run.network.joined(separator: "\n"))
         }
     }
 } }
@@ -169,6 +182,14 @@ extension Scheduled { @Suite struct TwoPhase {
 extension Run {
     /// A one-state trace for end-of-run predicates.
     var lastState: Run { var r = self; r.events = events.suffix(1); return r }
+}
+
+struct RefinementViolation: Error, CustomStringConvertible {
+    let violation: TCommit.Violation, steps: [TCommit.Step], trace: [String], network: [String]
+    var description: String {
+        "does not refine TCommit: \(violation)\nsteps:\n" + steps.enumerated().map { "\($0 == violation.index ? "→" : " ") \($1)" }.joined(separator: "\n")
+            + "\nnetwork:\n" + network.joined(separator: "\n")
+    }
 }
 
 struct Violation: Error, CustomStringConvertible {
