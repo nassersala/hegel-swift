@@ -690,6 +690,71 @@ hegel found a bug in the cell. A read that must wait is two jobs on the actor, t
 
 This is Sussman and Radul's propagator model over an LVar-style lattice, and "monotone, so any order and any redelivery" is the CALM theorem. The example's claim is smaller: two sorts are two propagator sets over one cell type, and the laws, the soundness, the confluence, the cost, the deadlock and the lost wakeup are all properties hegel checks.
 
+## Example: above the code, and the trace as the algorithm
+
+Lamport's method has a first step before the spec: write one behaviour by hand, read the variables off it, decide what one step is, and only then write Next. `Examples/AboveTheCode` applies that to sorting three times. The method is also a skill, `.claude/skills/above-the-code`, so an agent can be made to draw before it codes; `specs/algorithm-search-experiments.md` is the evaluation.
+
+**The trace is the algorithm.** Die Hard's shrunk counterexample is a plan for one instance. Make the state every input at once and it is an algorithm. By the zero-one principle a comparator sequence sorts every input of length `n` iff it sorts every vector over `{0, 1}`, so the state is that set, a rule is one comparator applied to every vector, and the false invariant is "not all sorted":
+
+```swift
+Rule("cmp 0 1") { s, _ in s.apply(Comparator(0, 1)) }        // one of n(n−1)/2
+Invariant("not all sorted") { if $0.allSorted { throw NetworkFound() } }
+```
+
+```
+n = 4, seed 1: cmp 0 2; cmp 1 3; cmp 0 1; cmp 2 3; cmp 1 2 — 5 comparators
+```
+
+Five is the optimum for `n = 4`. Eighteen of twenty seeds shrink to it, two to six; unseeded walks hit 20 of 20, because a comparator never unsorts a vector and while any vector is unsorted some comparator lowers its inversions, so the walk is monotone. The witness certifies itself, which Die Hard's does not: the goal is exact on a finite state, and the example checks it anyway, on all 16 vectors and then on all 24 permutations. Drawing the `n = 2` behaviour by hand, `{00, 01, 10, 11}` then `cmp 0 1` then `{00, 01, 11}`, showed the set shrinks: vectors merge. So "count the sorted vectors" is constant from the start, and the targeting score is the unsorted count. For `n = 5` under a step budget near the optimum of nine, targeting helped (12 steps: 6 of 20 random, 11 of 20 targeted) and with slack it cost hits (16 steps: 20 versus 17).
+
+**The relation above Fung.** Fung's 2021 "simplest sorting algorithm", two full loops and a swap when `A[i] < A[j]`, looks wrong and sorts ascending. Drawn one state per pass on `[1, 0, 2]`:
+
+```
+[1, 0, 2] ─pass 0─▶ [2, 0, 1] ─pass 1─▶ [0, 2, 1] ─pass 2─▶ [0, 1, 2]
+```
+
+The variables: a sorted prefix and the rest. The step: one element joins the prefix at its place. And pass 0 turned the rest `[0, 2]` into `[0, 1]`: it permutes the rest. Three relations, checked as `Lamport.refines` is:
+
+```
+relation 1 (a step swaps an inversion)      refuted on [0, 1]: (from: [0, 1], to: [1, 0])
+relation 2 (insertion, remainder fixed)     refuted on [1, 0, 2]: prefix = [], rest = [1, 0, 2] → prefix = [2], rest = [0, 1]
+relation 3 (insertion, remainder permuted)  Fung refines it; insertion sort refines it and relation 2
+```
+
+Two pieces of code, one relation above them, differing by which element a pass picks. Exchange sort refines relation 1 and Fung does not, on the first swap of a sorted pair. What relation 3 does not say is why Fung's later passes leave the rest alone; that is his invariant, which the refinement check does not need and does not find.
+
+**The control.** Fung found his algorithm by "making up some wrong sorting algorithms". A grammar of 24 double-loop swap programs, run on drawn arrays against `sorted()` both ways: 8 ascending, 8 descending, 8 neither, every `neither` refuted by an array of two or three elements, exactly the table worked by hand before the run. It finds programs and says nothing about why they sort. That is the method minds-in-code use, and the baseline the skill is measured against.
+
+**The skill, piloted.** Asked for a non-recursive mergesort with no repository access, an agent following the skill drew `[3, 1, 2, 0]` through three merges, could not write the third arrow from the row alone, and wrote in the missing variable: `R`, the set of runs already sorted. Its Next picks any two adjacent runs; its bottom-up and recursive mergesorts are two refinements differing only in which pair they pick. `Mergesort.swift` is that answer ported with its names kept, and Hegel confirms it: every drawn behaviour keeps `Inv` and ends with one run in `N − 1` steps, both codes refine, and the off-by-one the agent predicted is rejected at step 0 as "a named run is not in R" and shrinks to `[0, 0, 0]`, an input on which the output is correct. The control, asked the same question, wrote the bottom-up code first and explained it by its loop invariant; correct, and no relation. Asked why Fung's algorithm sorts, the agent following the skill drew it per pass, read off a sorted prefix and a bag of the rest, wrote insertion with any element as the pick, and refuted its own first draft, the head of the rest, from pass 1 of its drawing before any code: relation 2 and relation 3 above, found independently. It also claimed that skipping pass 0 sorts and does not refine the relation; Hegel confirms, refuted on `[1, 0, 2]` at the pass that evicts an element. The control gave the paper's invariant proof, correct, with one false sentence: that the `>` variant does not sort. The grammar table has it sorting descending. One run per cell; the design and the kill criteria are in the spec.
+
+**A view model above the code.** Search-as-you-type: a text field, one request per edit, a results list; responses arrive in any order and any request can fail. Drawn first on "a", "ab", "abc" with the second response failing and the first arriving late:
+
+```
+[query: "", shown: ⟨"", []⟩, pending: {}, error: no]
+ ─type "a"─▶      [query: "a",  shown: ⟨"", []⟩, pending: {0:"a"},         error: no]
+ ─type "ab"─▶     [query: "ab", shown: ⟨"", []⟩, pending: {0:"a", 1:"ab"}, error: no]
+ ─1 fails─▶       [query: "ab", shown: ⟨"", []⟩, pending: {0:"a"},         error: yes]
+ ─0 ok [a1, a2]─▶ [query: "ab", shown: ⟨"", []⟩, pending: {},              error: yes]   stale
+```
+
+Two variables had to be written in for the rows to follow from the arrows: `shown` carries the query its list answers, because at "1 fails" the next row needs to know whether the screen already answers "ab"; `pending` maps request numbers to queries, because at "0 ok" the next row needs to know that request 0 asked something no longer asked. A step is one edit or one arrival. Next has two disjuncts, `Type(q)` and `Arrive(r, outcome)` with `r` any pending request, and the invariant is what the screen promises: `¬Loading ⇒ shown.query = query ∨ error`, and never an error over a list that answers, where `Loading` is "a request for what is typed is in flight". Two wrong Arrive clauses are refuted on drawn behaviours before any code, both by the same three-event story, the user clears the field and a late response lands:
+
+```
+naive        refuted after type "a", type "", 0 ok ["a1", "a2"]: query = "", shown = ⟨"a", ["a1", "a2"]⟩, pending = [], error = false
+halfChecked  refuted after type "a", type "", 0 fails:           query = "", shown = ⟨"", []⟩, pending = [], error = true
+```
+
+`SearchViewModel` is the code: no SwiftUI, a transport protocol, `isLoading` derived rather than stored. `Search.refines` drives it through a drawn run, one edit or one delivery per event, and checks after each that the projected state is the relation's and the spinner is `Loading`. It holds on 100 drawn runs. Four seeded one-line bugs are each reported at the first event after which the code's state is not the relation's, shrunk to the shortest story; the spinner bug needs no arrival at all:
+
+```
+trustsEveryResponse    step 2: 0 ok ["a1", "a2"] is not a Next step   after type "a", type ""
+trustsEveryFailure     step 2: 0 fails is not a Next step             after type "a", type ""
+spinsForStaleRequests  step 1: type "" is not a Next step, isLoading is true, Loading is false
+errorOverAnswer        step 4: 1 fails is not a Next step             after type "a", type "", type "a", 0 ok
+```
+
+The two staleness bugs are also behaviours of the two wrong designs, checked the same way: each buggy view model is a faithful implementation of a wrong Arrive clause. What the relation does not say: a response for the current text is shown whichever request carried it, so a view model that discards all but the latest request does not refine it; that is a stricter design and would be a fourth Arrive clause.
+
 ## Example: transaction commit, and two-phase commit as its implementation
 
 Lamport's TLA+ course states transaction commit before two-phase commit. `TCommit` is the specification: resource managers, each `working`, `prepared`, `committed` or `aborted`; `Prepare(rm)` for a working one; `Decide(rm)` commits a prepared one only if every RM is prepared or committed, and aborts a working or prepared one only if none has committed. No coordinator, no messages. Two-phase commit is one implementation, and its theorem is `TPSpec ⇒ TC!TCSpec`: every behaviour of the protocol is a behaviour of the specification once the coordinator's state and the messages are forgotten. `Examples/TwoPhaseCommit` takes the same order. `TCommit.swift` is the specification as a next-state relation, the `Lamport.refines` shape of the quicksort example:
@@ -825,6 +890,7 @@ The Antithesis platform is deliberately *not* part of this layer, even though He
 - [x] Agda-verified finite-model experiment: Agda proves properties of one executable transition function and exports its complete table; Hegel checks a separate Swift implementation against it and shrinks a planted refinement bug to one command; `Examples/AgdaVerifiedModel`
 - [x] Spelling: subject-first laws (`forAll(f, is: .idempotent, on:)`), key-path relations, `tc.draw`, leading-dot combinators, ranges as generators, any-arity `zip` (fixed 2–4 kept for backward inference)
 - [x] Denotational design as model-based testing: value types against their meaning with a stack as the state, so linear command sequences build arbitrary terms; Elliott's left-biased `Map` merge shrinks to `push, dup, add` (`Tests/HegelTests/DenotationalTests.swift`); no `Laws.abstraction`
+- [x] Above the code: Lamport's method as a skill (`.claude/skills/above-the-code`) and three sorting fixtures, the sorting network as the shrunk trace (optimum 5 for `n = 4` in 18 of 20 seeds), the insertion relation above Fung's algorithm with two wrong relations refuted on `[0, 1]` and `[1, 0, 2]`, the 24-program grammar as the control; search-as-you-type as a relation over edits and arrivals in any order with a SwiftUI-free view model refining it and four seeded bugs reported as the first non-step; `Examples/AboveTheCode` (`specs/algorithm-search-experiments.md`)
 - [ ] Validate against `hegeldev/hegel-core` (the cross-language protocol suite)
 
 ## References
