@@ -10,19 +10,24 @@ import CHegel
 /// Blobs are version-pinned (they replay only on the libhegel version that
 /// produced them) and generator-shaped: replaying a blob through a
 /// *different* generator than the one that failed overruns or produces an
-/// unrelated value.
+/// unrelated value. They are also settings-shaped: `settings` must be the
+/// run's, because the engine interprets the choice sequence under them (a
+/// stateful blob of 80 steps overruns at the default step count of 50 and
+/// replays as a shorter, passing run). `forAll` passes its own; pass the
+/// same when replaying a stored blob by hand.
 public func replay<A>(
     _ gen: Gen<A>,
     blob: String,
+    settings: Settings = Settings(),
     output: ((String) -> Void)? = nil
 ) throws -> A {
     let ctx = Context()
 
-    var settings: OpaquePointer?
-    try check(hegel_settings_new(ctx.raw, &settings), ctx.lastError)
-    defer { _ = hegel_settings_free(ctx.raw, settings) }
-    // Hermetic: replay must not touch the example database.
-    try check(hegel_settings_set_database(ctx.raw, settings, ""), ctx.lastError)
+    let rawSettings = try settings.makeHandle(ctx)
+    defer { _ = hegel_settings_free(ctx.raw, rawSettings) }
+    // Hermetic: replay must not touch the example database, whatever the
+    // run's settings said.
+    try check(hegel_settings_set_database(ctx.raw, rawSettings, ""), ctx.lastError)
 
     // Unlike a run's callback, this one is only invoked during the call
     // below and need not outlive it.
@@ -31,7 +36,7 @@ public func replay<A>(
     try withExtendedLifetime(outputBox) {
         try check(
             hegel_test_case_from_blob(
-                ctx.raw, settings, blob,
+                ctx.raw, rawSettings, blob,
                 outputBox == nil ? nil : outputTrampoline,
                 outputBox.map { Unmanaged.passUnretained($0).toOpaque() },
                 &rawCase),

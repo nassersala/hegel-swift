@@ -115,4 +115,26 @@ private struct CounterViolation: Error {}
             ],
             database: "")
     }
+
+    /// The displayed counterexample is the violating run, not a replay
+    /// truncated at the default step count: a violation reachable only
+    /// after 80 steps under `statefulStepCount: 200` must print with its
+    /// `violated:` line and all its steps. (It used to replay the blob under
+    /// default settings, overrun at 50 steps, and show a passing run.)
+    @Test func counterexampleBeyondTheDefaultStepCountShowsItsViolation() throws {
+        struct TooMany: Error {}
+        do {
+            try forAll(
+                initial: .constant(0),
+                rules: [Rule("inc") { n, _ in n += 1 }],
+                invariants: [Invariant("n < 80") { n in if n >= 80 { throw TooMany() } }],
+                testCases: 300, seed: 1, database: "",
+                settings: Settings(statefulStepCount: 200))
+            Issue.record("expected the property to fail")
+        } catch let failure as PropertyFailure {
+            let shown = try #require(failure.failures.first?.counterexample)
+            #expect(shown.contains("violated: TooMany()"))
+            #expect(shown.split(separator: "\n").filter { $0.hasSuffix("inc") }.count == 80)
+        }
+    }
 }

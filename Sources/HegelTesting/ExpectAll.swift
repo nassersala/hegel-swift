@@ -101,7 +101,8 @@ public func expectAll<A>(
             // Replay the minimal case with interception off: the body's own
             // #expect failure is recorded at the shrunk input, pointing at
             // the exact expectation that broke.
-            guard let blob = f.reproduceBlob, let value = try? replay(gen, blob: blob) else {
+            guard let blob = f.reproduceBlob,
+                  let value = try? replay(gen, blob: blob, settings: settings) else {
                 continue
             }
             do { try property(value) } catch {
@@ -160,7 +161,8 @@ public func expectAll<A>(
                 \(f.reproduceBlob.map { "\n reproduce blob: \($0)" } ?? "")
                 """,
                 sourceLocation: sourceLocation)
-            guard let blob = f.reproduceBlob, let value = try? replay(gen, blob: blob) else {
+            guard let blob = f.reproduceBlob,
+                  let value = try? replay(gen, blob: blob, settings: settings) else {
                 continue
             }
             do { try await property(value) } catch {

@@ -79,6 +79,9 @@ final class Run<A> {
     let ctx = Context()
     let gen: Gen<A>
     let origin: String
+    /// Kept for replaying failures: a blob only means what it meant under
+    /// the settings that produced it.
+    let settings: Settings
     private let outputBox: OutputBox?
     private let rawSettings: OpaquePointer?
     private var run: OpaquePointer?
@@ -91,32 +94,32 @@ final class Run<A> {
     ) throws {
         self.gen = gen
         self.origin = origin
+        self.settings = settings
         // Engine output (per Settings.verbosity) goes to `output` line by
         // line instead of stderr. Lines are emitted inside
         // hegel_next_test_case calls, so the box lives as long as the run.
         self.outputBox = output.map(OutputBox.init)
         self.rawSettings = try settings.makeHandle(ctx)
+        // From here every stored property is set, so a throw runs `deinit`,
+        // which is the one place the handles are freed. No catch here: a
+        // second free on this path would be a double free.
         var run: OpaquePointer?
-        do {
-            try check(
-                hegel_run_start(
-                    ctx.raw, rawSettings,
-                    outputBox == nil ? nil : outputTrampoline,
-                    outputBox.map { Unmanaged.passUnretained($0).toOpaque() },
-                    &run),
-                ctx.lastError)
-        } catch {
-            _ = hegel_settings_free(ctx.raw, rawSettings)
-            throw error
-        }
+        try check(
+            hegel_run_start(
+                ctx.raw, rawSettings,
+                outputBox == nil ? nil : outputTrampoline,
+                outputBox.map { Unmanaged.passUnretained($0).toOpaque() },
+                &run),
+            ctx.lastError)
         self.run = run
     }
 
     deinit {
-        // Reverse order of acquisition; `ctx` is released after this body.
-        // hegel_run_free completes any in-flight test case, which is what
-        // makes throwing out of the loop (cancellation, timeout, an engine
-        // error) safe.
+        // The sole owner of both handles; reverse order of acquisition, and
+        // `ctx` is released after this body. Both frees accept NULL, so a
+        // deinit reached from a throwing init is fine. hegel_run_free
+        // completes any in-flight test case, which is what makes throwing
+        // out of the loop (cancellation, timeout, an engine error) safe.
         _ = hegel_run_free(ctx.raw, run)
         _ = hegel_settings_free(ctx.raw, rawSettings)
         withExtendedLifetime(outputBox) {}
@@ -205,7 +208,7 @@ final class Run<A> {
                 // blob through the same generator. Best-effort: a replay
                 // failure leaves the blob as the fallback.
                 let counterexample = blob.flatMap { b in
-                    (try? replay(gen, blob: b)).map { String(describing: $0) }
+                    (try? replay(gen, blob: b, settings: settings)).map { String(describing: $0) }
                 }
                 failures.append(Failure(
                     origin: originPtr.map { String(cString: $0) } ?? origin,
