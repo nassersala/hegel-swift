@@ -127,13 +127,46 @@ each pass picks. When a code's behaviour is not a behaviour of the relation
 you wrote, say which of the two is wrong and why; if the relation is too
 strict, weaken one clause and record which.
 
-## 7. Report
+## 6a. Two claims a relation makes without saying so
+
+- **Steps are whole.** If the code will be async, or called from more than
+  one task, that is a claim, not an assumption. Run the refinement under
+  the controlled scheduler in `Examples/ScheduleProperties`, and plant the
+  classic bug, an `await` between the check and the commit of one step, to
+  show the check bites. `Examples/TwoPhaseCommit` is the precedent: the
+  same-actor `await` in the decide step was a suspension point.
+- **A step that can repeat is bounded, or it is not.** A retry, a refresh,
+  a resend: if Next lets it happen again with nothing in between, say
+  whether that is a loop the relation permits forever. Write the bound as
+  a clause, and its safety form as a temporal formula over the trace,
+  checked with `TemporalLogic.swift`: "no two refreshes without a success
+  between them". The invariant cannot say it, because an invariant sees
+  one state; the formula sees the loop at its second turn and the shrinker
+  finds it. Liveness itself is not testable on a finite trace; say so.
+
+## 7. Report, and what the relation does not say
 
 In this order: the drawn behaviour; the variables; what a step is; Init
 and Next; the checks and their numbers; the code and the refinement result;
 what the relation does not say. The last item matters: refinement shows
 the code is a behaviour of the relation, it does not say why the code is
 one. Silence from the checker is not a proof.
+
+The list of what the relation does not say is not the end of the run.
+Every item on it gets one of three verdicts, and the run ends when each
+has been handled:
+
+- **Checkable now.** Write the check and run it in this session. A bound,
+  a liveness formula, a second refinement, the async version under
+  schedules.
+- **A product decision.** Stop and ask, with the alternatives stated as
+  clauses of Next, not as prose. "A refresh that fails from the network
+  signs out" versus "is retried once with the same token" is a decision
+  the person makes, and it goes into the relation once made.
+- **Out of scope.** One line saying why, and what would change if it came
+  in. Another process sharing the same state (an app extension reading the
+  same Keychain item) is the usual one: it breaks a one-session relation
+  and no check of the session finds it.
 
 ## What the method does not do
 

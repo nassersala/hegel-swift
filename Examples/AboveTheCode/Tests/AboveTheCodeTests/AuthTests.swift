@@ -44,8 +44,39 @@ import AboveTheCode
                 #expect(run.events[...k] == [.send, .unauthorized(0), .refreshFailed])
                 #expect(run.states[k].creds == Auth.credentials(0))
                 #expect(run.states[k].refreshing == nil)
-            case .checked: break
+            case .unbounded, .checked: break
             }
+        }
+    }
+
+    /// The bound as a trace property: after a refresh starts, none starts
+    /// again until the token it returned has been accepted. Inv cannot
+    /// say this; the formula holds on every drawn behaviour of the
+    /// relation.
+    @Test(.propertyTesting) func noSecondRefreshWithoutASuccessBetween() {
+        expectAll(Auth.behaviour(), testCases: 1000, database: "") { run in
+            #expect(evaluate(Auth.oneRefreshPerProof, over: Auth.moments(run)), "\(run.events)")
+        }
+    }
+
+    /// The unbounded design keeps Inv and fails the formula, in four
+    /// events: one request, one 401, one refresh, and a 401 on the token
+    /// it returned. That is the loop, caught at its second turn.
+    @Test func theUnboundedDesignRefreshesForever() throws {
+        do {
+            try forAll(Auth.behaviour(design: .unbounded), testCases: 2000, seed: 1, database: "") { run in
+                for s in run.states where !s.truthful { throw Untruthful("\(s)") }
+                if let k = firstFailure(of: Auth.oneRefreshPerProof, over: Auth.moments(run)) {
+                    throw NotAStep("formula fails at position \(k) of \(run.events)")
+                }
+            }
+            Issue.record("the unbounded design kept the formula")
+        } catch let failure as PropertyFailure {
+            let run = try replay(Auth.behaviour(design: .unbounded), blob: try #require(failure.failures.first?.reproduceBlob))
+            let k = try #require(firstFailure(of: Auth.oneRefreshPerProof, over: Auth.moments(run)))
+            print("unbounded refuted at position \(k): \(run.events.map(\.description).joined(separator: ", "))")
+            #expect(run.events.prefix(4) == [.send, .unauthorized(0), .refreshed(Auth.credentials(1)), .unauthorized(0)])
+            #expect(run.states[3].refreshing == "f1")
         }
     }
 
@@ -102,6 +133,11 @@ import AboveTheCode
                 #expect(v.step == 2)
                 #expect(run.events[...2] == [.send, .unauthorized(0), .refreshFailed])
                 #expect(v.got?.creds == Auth.credentials(0))
+            case .refreshesForever:
+                #expect(v.step == 3)
+                #expect(run.events[...3] == [.send, .unauthorized(0), .refreshed(Auth.credentials(1)), .unauthorized(0)])
+                #expect(v.got?.refreshing == "f1")
+                #expect(v.expected.creds == nil)
             }
         }
     }

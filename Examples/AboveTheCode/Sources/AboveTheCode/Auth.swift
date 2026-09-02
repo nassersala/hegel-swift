@@ -58,6 +58,24 @@ import Hegel
 ///         ∧ (refreshing ≠ none ⇒ refreshing = creds.refresh)
 ///         ∧ (∃ i: reqs[i] = waiting ⇒ refreshing ≠ none)
 ///
+/// The bound. As first written, Next let a token rejected the moment it
+/// was issued refresh again, forever; Inv held on every state of that
+/// loop, because Inv is about one refresh at a time. The relation's own
+/// report said so, and the verdict was "checkable now". One variable and
+/// one clause: `unproven` is true from a refresh until the access token
+/// it returned has been accepted once.
+///
+///     Ok(i):           … ∧ unproven′ = (reqs[i] = sent(creds.access) ? false : unproven)
+///     Refreshed(c):    … ∧ unproven′ = true
+///     Unauthorized(i): reqs[i] = sent(creds.access) ∧ refreshing = none ∧ unproven
+///                      ⇒ creds′ = out ∧ reqs′ = reqs \ {i} ∧ done′ = done ∪ {i ↦ failed}
+///
+/// Inv cannot state the bound; it is a property of the trace. As a
+/// safety formula, `oneRefreshPerProof`: after a refresh starts, no
+/// refresh starts again until an ok under the current token. Checked on
+/// every drawn behaviour, and the unbounded design is refuted by it in
+/// four events.
+///
 /// Every variable not mentioned in a clause is unchanged. The "pick
 /// any"s: which in-flight request answers and with what, whether the
 /// refresh succeeds, when the app sends. Inv is what the session
@@ -127,6 +145,9 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
         case refreshesOnEvery401
         /// A failed refresh fails the waiters and keeps the credentials.
         case staysSignedIn
+        /// No bound: a token rejected the moment it is issued refreshes
+        /// again. Inv holds; the trace formula does not.
+        case unbounded
         /// The relation above.
         case checked
     }
@@ -141,6 +162,9 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
     public var next: Int
     /// How many credential pairs have been issued; names the fresh ones.
     public var generation: Int
+    /// The current access token came from a refresh and has not been
+    /// accepted yet. The bound reads it.
+    public var unproven: Bool
 
     public init() {
         creds = Auth.credentials(0)
@@ -150,9 +174,10 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
         done = [:]
         next = 0
         generation = 0
+        unproven = false
     }
     public init(creds: Credentials?, requests: [Int: Phase], refreshing: String?, rejected: Set<String>,
-                done: [Int: Outcome], next: Int, generation: Int) {
+                done: [Int: Outcome], next: Int, generation: Int, unproven: Bool = false) {
         self.creds = creds
         self.requests = requests
         self.refreshing = refreshing
@@ -160,6 +185,7 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
         self.done = done
         self.next = next
         self.generation = generation
+        self.unproven = unproven
     }
 
     /// The g-th credential pair. The relation says only "fresh"; the
@@ -181,8 +207,8 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
     public var description: String {
         let reqs = requests.keys.sorted().map { "\($0): \(requests[$0]!)" }.joined(separator: ", ")
         let outcomes = done.keys.sorted().map { "\($0): \(done[$0]!)" }.joined(separator: ", ")
-        return "creds = \(creds.map(\.description) ?? "out"), reqs = {\(reqs)}, refreshing = \(refreshing ?? "no"), "
-            + "rejected = \(rejected.sorted()), done = {\(outcomes)}"
+        return "creds = \(creds.map(\.description) ?? "out")\(unproven ? " unproven" : ""), reqs = {\(reqs)}, "
+            + "refreshing = \(refreshing ?? "no"), rejected = \(rejected.sorted()), done = {\(outcomes)}"
     }
 
     // MARK: Next
@@ -211,6 +237,7 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
             }
             next += 1
         case .ok(let i):
+            if case .sent(let a) = requests[i], a == creds?.access { unproven = false }
             requests[i] = nil
             done[i] = .ok
         case .unauthorized(let i):
@@ -225,6 +252,12 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
                 requests[i] = .waiting
             } else if a != creds.access && design != .refreshesOnEvery401 {
                 requests[i] = .sent(creds.access)
+            } else if a == creds.access && unproven && design != .unbounded {
+                // The token the last refresh returned was rejected with
+                // no success in between: refreshing again is the loop.
+                self.creds = nil
+                requests[i] = nil
+                done[i] = .failed
             } else {
                 requests[i] = .waiting
                 refreshing = creds.refresh
@@ -233,6 +266,7 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
             creds = c
             refreshing = nil
             generation += 1
+            unproven = true
             for (i, p) in requests where p == .waiting { requests[i] = .sent(c.access) }
         case .refreshFailed:
             if design != .staysSignedIn { creds = nil }
@@ -305,5 +339,37 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
             }
             return Run(events: events, states: states, final: s)
         }
+    }
+
+    // MARK: The trace property
+
+    /// One position of the trace: the event that led here, and the state.
+    public struct Moment: Sendable {
+        public let event: Event?
+        public let state: Auth
+    }
+
+    /// The run as a trace, the initial state at position 0.
+    public static func moments(_ run: Run) -> [Moment] {
+        [Moment(event: nil, state: Auth())] + zip(run.events, run.states).map { Moment(event: $0, state: $1) }
+    }
+
+    /// A refresh starts at this position.
+    public static let refreshStarts: Pred<Moment> = .changed { prev, cur in
+        prev.state.refreshing == nil && cur.state.refreshing != nil
+    }
+
+    /// The current access token is accepted at this position: an ok to a
+    /// request that went out under it.
+    public static let proof: Pred<Moment> = .changed { prev, cur in
+        guard case .ok(let i) = cur.event, let c = prev.state.creds else { return false }
+        return prev.state.requests[i] == .sent(c.access)
+    }
+
+    /// After a refresh starts, no refresh starts again until the token it
+    /// returned has been accepted once. Weak until: the proof need never
+    /// come, as long as no second refresh does.
+    public static var oneRefreshPerProof: Pred<Moment> {
+        always(refreshStarts => weakNext(weakUntil(!refreshStarts, proof)))
     }
 }

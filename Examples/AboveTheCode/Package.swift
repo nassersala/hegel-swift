@@ -16,12 +16,19 @@ let package = Package(
     name: "AboveTheCode",
     platforms: [.macOS(.v15)],
     products: [.library(name: "AboveTheCode", targets: ["AboveTheCode"])],
-    dependencies: [.package(path: "../..")],
+    dependencies: [
+        .package(path: "../.."),
+        .package(path: "../ScheduleProperties"),  // the controlled scheduler, for "steps are whole"
+    ],
     targets: [
         .target(name: "AboveTheCode", dependencies: [.product(name: "Hegel", package: "hegel-swift")]),
         .testTarget(
             name: "AboveTheCodeTests",
-            dependencies: ["AboveTheCode", .product(name: "HegelTesting", package: "hegel-swift")]
+            dependencies: [
+                "AboveTheCode",
+                .product(name: "HegelTesting", package: "hegel-swift"),
+                .product(name: "Schedules", package: "ScheduleProperties"),
+            ]
         ),
     ]
 )

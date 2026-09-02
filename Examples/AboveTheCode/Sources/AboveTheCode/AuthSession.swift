@@ -44,10 +44,16 @@ public final class AuthSession {
         case forgetsRotatedRefreshToken
         /// A failed refresh fails the queue and keeps the credentials.
         case keepsCredentialsOnRefreshFailure
+        /// No bound: a 401 on the token the last refresh returned
+        /// refreshes again, and again.
+        case refreshesForever
     }
 
     /// `nil` is signed out.
     public private(set) var credentials: Auth.Credentials?
+    /// The access token came from a refresh and has not been accepted
+    /// yet. A 401 on it signs out rather than refreshing again.
+    public private(set) var unproven = false
     /// Requests held back until the refresh in flight completes. The
     /// refinement mapping needs it; an app can count it for a spinner.
     public var queued: [Request] { waiting.map(\.request) }
@@ -93,6 +99,7 @@ public final class AuthSession {
                           _ deliver: @escaping (Result<String, Failure>) -> Void) {
         switch status {
         case .ok(let body):
+            if token == credentials?.access { unproven = false }
             deliver(.success(body))
         case .unauthorized:
             guard let credentials else { return deliver(.failure(.signedOut)) }
@@ -103,6 +110,10 @@ public final class AuthSession {
             if token != credentials.access && bug != .ignoresStaleness {
                 dispatch(request, under: credentials.access, deliver)
                 return
+            }
+            if token == credentials.access && unproven && bug != .refreshesForever {
+                self.credentials = nil
+                return deliver(.failure(.signedOut))
             }
             waiting.append(Waiter(request: request, token: token, deliver: deliver))
             refreshInFlight = true
@@ -121,6 +132,7 @@ public final class AuthSession {
             } else {
                 credentials = fresh
             }
+            unproven = true
             for w in waiters {
                 dispatch(w.request, under: bug == .retriesUnderOldToken ? w.token : fresh.access, w.deliver)
             }
@@ -229,7 +241,8 @@ extension Auth {
         }
         guard api.refreshing.count <= 1 else { return (nil, "the code has \(api.refreshing.count) refreshes in flight") }
         return (Auth(creds: session.credentials, requests: requests, refreshing: api.refreshing.first,
-                     rejected: api.rejected, done: delivered, next: sent, generation: api.issued), nil)
+                     rejected: api.rejected, done: delivered, next: sent, generation: api.issued,
+                     unproven: session.unproven), nil)
     }
 
     public struct Violation: CustomStringConvertible, Sendable {

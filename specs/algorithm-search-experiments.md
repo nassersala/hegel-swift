@@ -266,6 +266,29 @@ was not lost on an agent; no treatment relation failed measure 5. One run
 per cell is a pilot. The full run needs more seeds, a third problem, and a
 judge who did not write the skill.
 
+## E5: the verdict step, applied to the auth run
+
+The token-refresh run (`Examples/AboveTheCode/Sources/AboveTheCode/Auth.swift`,
+made in a separate session from the skill alone) ended with a list of what
+its relation did not say and stopped there. Reviewing the list against a
+real app gave three items that were not scope, and the skill gained a rule:
+each item gets a verdict, checkable now, product decision, or out of scope,
+and the run ends when each is handled. Applying it:
+
+| item | verdict | result |
+|---|---|---|
+| no bound on refreshes | checkable | one variable (`unproven`) and one clause; the safety form as a temporal formula; the unbounded design refuted in four events, the session bug `refreshesForever` at step 3 |
+| steps are whole | checkable | actor session under drawn schedules; the planted `await` between check and claim exploited with one deviation; two further bugs found writing the correct version (claim behind a same-actor `await`; lost wakeup in the wait) |
+| refresh network failure versus rejection | product decision | not decided here; stated as two clauses of RefreshFailed for the owner to pick |
+| an app extension sharing the Keychain item | out of scope | breaks the one-session assumption; no check of the session finds it |
+| liveness: every issued request is answered | checkable, not in Hegel | `TLA/Auth.tla`, TLC: holds under weak fairness of the server, 263 states bounded, 529 unbounded; the trace property fails unbounded in the same four steps Hegel shrank to |
+
+The rule is now in the skill as step 6a and the end of step 7. What the
+scheduler found in the correct version is the finding: the relation was
+right, the synchronous session was right, and the actor session was wrong
+twice in ways the drawn behaviours cannot see, because a behaviour of the
+relation has no inside to its steps.
+
 ## Not claimed
 
 - Hegel does not find the variables. The drawing and the reading are done by
