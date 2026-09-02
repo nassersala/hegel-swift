@@ -318,6 +318,32 @@ checks; no README or memory edits.
 
 Eleven minutes. Six tests, green alongside the rest of the example.
 
+## E7: the calculation twin
+
+The drawing finds the state at the row that does not determine the next
+row; Bahr and Hutton's calculation finds the constructors at the goal the
+proof cannot take. Same move, two sides. `Bank.swift` and `BankTests.swift`
+make Hegel the refute half of the calculation: the equation as a property
+with `send` partial, the shrunk counterexample as the stuck goal. Results:
+
+- The stuck goals arrive in the proof's order, `deposit 0`, `withdraw 0`,
+  `deposit 0 then deposit 0`, each with `b = 0` in scope; after `SEQ`
+  nothing is stuck. A wrong birth is refuted with values, a different
+  failure from stuck.
+- The continuation spelling has no birth at `then`; the append spelling
+  does. Both pass the property. The fork is invisible to refutation.
+- Pilot C (`Pilot/C-calculation.md`), a fresh agent as the proposing half,
+  one goal per round: `Deposit`, `Withdraw`, `Then` (Fork A) unprompted;
+  append with the lemma named under the flat-stream constraint; the
+  continuation with the changed equation only under the demand for a
+  proof by computation. Prediction held: the tester never forces the
+  third move, the prover does.
+
+Where it fits the skill: if the input is a term and the meaning a function
+of it, write the correctness equation with the unknowns before drawing,
+and let the stuck goals name the constructors; draw when the meaning is a
+property of a trace. One line for the skill, not built yet.
+
 ## Not claimed
 
 - Hegel does not find the variables. The drawing and the reading are done by

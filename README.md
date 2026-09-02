@@ -785,6 +785,17 @@ step 0 ((0,1) ← 0): predecessor (0,0) not known; distance 0, reference 1
 
 One deviation, and the refinement names the step before the answer is compared. The verdicts at the end: the value's correctness, the wholeness of the parallel steps, and termination were checked; what a character is, `Character` versus unicode scalar, was taken as an assumption and named as the product decision; the two-row table, where a reused slot does change and the read-write split would bite, is the refinement not built.
 
+**The calculation as propose and refute.** Bahr and Hutton derive a compiler by proving its correctness equation and defining, at every goal the proof cannot take, the instruction that makes it compute. `Bank.swift` does the bank version of that with Hegel as the half a tester can be: requests and their meaning are known, the messages are not, and the equation `⟦ r ⟧ b == apply(send(r), b)` is a property with `send` partial. The shrunk counterexample is the stuck goal as a concrete term, with the values in scope:
+
+```
+nothing: stuck at ⟦ deposit 0 ⟧ 0 = 0: send is undefined
+credit:  stuck at ⟦ withdraw 0 ⟧ 0 = 0: send is undefined
+debit:   stuck at ⟦ (deposit 0 then deposit 0) ⟧ 0 = 0: send is undefined
+sequence: nothing stuck
+```
+
+The goals come in the proof's order, each the smallest term of its kind. Hegel cannot solve one; something proposes a constructor whose fields are the variables in scope, and the next run finds the next goal. A wrong proposal, `DEBIT` applied as `b + n`, is refuted with `withdraw 1` at balance 0, not reported as stuck. `Pilot/C-calculation.md` is a fresh agent as the proposing half, one goal per round: `Deposit n`, `Withdraw n`, then `Then m₁ m₂`, the tree, unprompted. Told the wire is a flat stream, it proposed append and named the lemma it needs. Told every case must hold by computation, it changed the equation to `applyAll (send r ms) b == applyAll ms (⟦ r ⟧ b)` and produced the continuation, with the top level as `ms = []`. Both stream spellings pass the property; the fork between them is visible to the prover and not to the tester, which is the fixture's finding: refute cheaply here, decide the fork, prove once in Agda.
+
 ## Example: transaction commit, and two-phase commit as its implementation
 
 Lamport's TLA+ course states transaction commit before two-phase commit. `TCommit` is the specification: resource managers, each `working`, `prepared`, `committed` or `aborted`; `Prepare(rm)` for a working one; `Decide(rm)` commits a prepared one only if every RM is prepared or committed, and aborts a working or prepared one only if none has committed. No coordinator, no messages. Two-phase commit is one implementation, and its theorem is `TPSpec ⇒ TC!TCSpec`: every behaviour of the protocol is a behaviour of the specification once the coordinator's state and the messages are forgotten. `Examples/TwoPhaseCommit` takes the same order. `TCommit.swift` is the specification as a next-state relation, the `Lamport.refines` shape of the quicksort example:
