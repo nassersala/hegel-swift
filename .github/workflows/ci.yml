@@ -47,6 +47,10 @@ jobs:
         run: swift test --package-path Examples/Quicksort
       - name: Test example (AboveTheCode)
         run: swift test --package-path Examples/AboveTheCode
+      - name: Test example (BankSystem)
+        run: swift test --package-path Examples/BankSystem
+      - name: Test example (BankControl)
+        run: swift test --package-path Examples/BankControl
       - name: Test example (TwoPhaseCommit)
         run: swift test --package-path Examples/TwoPhaseCommit
       - name: Test example (AgdaVerifiedModel)
