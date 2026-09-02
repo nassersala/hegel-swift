@@ -760,12 +760,30 @@ The two staleness bugs are also behaviours of the two wrong designs, checked the
 ```
 unbounded refuted at position 2: send, 0 gets 401, refresh ok ⟨a1,f1⟩, 0 gets 401, …
 await between check and claim, schedule at choice point 4 run ready[0]:
-  send, 0 gets 401, send, 1 gets 401, refresh ok ⟨a1,f1⟩, 1 ok, refresh fails; first non-step 1 gets 401 at 3
+  send, 0 gets 401, send, 1 gets 401, refresh ok ⟨a1,f1⟩, 1 ok, refresh rejected; first non-step 1 gets 401 at 3
 ```
 
 The first is the loop: a token rejected the moment it is issued refreshes again, forever, and the invariant holds on every state of it because an invariant sees one state. The bound is one clause and one variable, and its safety form is a temporal formula over the trace, `always(refreshStarts => weakNext(weakUntil(!refreshStarts, proof)))`, which the unbounded design fails at the loop's second turn. The second is "steps are whole", the claim every relation makes without saying so. `AsyncAuthTests.swift` is the session as an actor under the controlled scheduler of `Examples/ScheduleProperties`, two requests, the schedule drawn. Put the Keychain read between the check and the claim and one deviation is enough: a request goes out under a token the relation already knows is bad, then two refreshes, the second with a spent token, the user signed out. Writing the correct version found two more, both by the scheduler: the claim behind a same-actor `await` is behind a suspension point, and a wait that checks and then registers its continuation loses the wakeup when the refresh completes in between. The correct session decides synchronously and re-checks inside the continuation; it refines the relation under 300 schedules. The skill now says both: an async implementation is checked under schedules, and a step that can repeat gets a bound or a formula.
 
-`TLA/Auth.tla` is the same relation for TLC, credentials named by generation, `N = 3` requests and `G = 2` refreshes. It adds what a finite trace cannot: the whole state space, 263 states with the bound, and the liveness `\A i : [](Issued(i) => <>(done[i] # "none"))` under weak fairness of the server's answers. Without the bound the invariant and the liveness still hold over 529 states, and the action property `[][RefreshStarts => ~unproven]_vars` is violated in four steps: send, 401, refresh, 401 on the new token. The same story, found exhaustively. `TLA/run.sh` runs the three configurations.
+The third item was a product decision, and it was decided rather than inherited: a refresh call that does not come back is not a rejection, since the server may not have consumed the token, so it is retried once with the same token and then treated as one. One variable, `retried`, keeps it at once; the session bugs `givesUpOnFirstNetworkError` and `retriesForever` are reported at steps 2 and 3.
+
+`TLA/Auth.tla` is the same relation for TLC, credentials named by generation, `N = 3` requests and `G = 2` refreshes. It adds what a finite trace cannot: the whole state space, 311 states with the bound, and the liveness `\A i : [](Issued(i) => <>(done[i] # "none"))` under weak fairness of the server's answers. Without the bound the invariant and the liveness still hold over 716 states, and the action property `[][RefreshStarts => ~unproven]_vars` is violated in four steps: send, 401, refresh, 401 on the new token. The same story, found exhaustively. `TLA/run.sh` runs the three configurations.
+
+**Edit distance, the way Lamport specifies quicksort.** The recursive definition and the row-by-row table are two programs; the relation is neither. Drawn first on `"ab"` and `"b"`, in an order that is neither the recursion's nor the table's, the only variable is `D`, the partial function from cells to values, and the step is one cell computed from its known predecessors:
+
+```
+Next:  pick any c ∉ dom D with Pred(c) ⊆ dom D:  D′ = D ∪ {c ↦ Value(D, c)}
+Done:  (m, n) ∈ dom D
+```
+
+Every topological order of the cell graph is a behaviour, and every behaviour has exactly `(m+1)(n+1)` steps, which the relation says without a clause for it. `EditDistance.swift` checks every drawn behaviour against edit distance by its meaning, a breadth-first search for the shortest edit script with no recurrence in it, cell by cell on the prefixes. Three refinements: the memoized recursion, the table, and a task per cell under the controlled scheduler. The recursion in textbook call order records the table's row-major trace exactly, which the test predicted otherwise and was refuted on. The wavefront was predicted to need only the cell above and the cell to the left, the diagonal being a predecessor of both; 200 schedules agree. An `await` between a cell's read and its write cannot split the step, because `D` only grows; a planted hop to a controlled actor confirms it. The bug that does bite is a missing wait, and the default depth-first schedule hides it because that schedule happens to be row-major:
+
+```
+upOnly, a = "", b = "a", schedule at choice point 0 run ready[0]: steps (0,1) ← 0, (0,0) ← 0
+step 0 ((0,1) ← 0): predecessor (0,0) not known; distance 0, reference 1
+```
+
+One deviation, and the refinement names the step before the answer is compared. The verdicts at the end: the value's correctness, the wholeness of the parallel steps, and termination were checked; what a character is, `Character` versus unicode scalar, was taken as an assumption and named as the product decision; the two-row table, where a reused slot does change and the read-write split would bite, is the refinement not built.
 
 ## Example: transaction commit, and two-phase commit as its implementation
 

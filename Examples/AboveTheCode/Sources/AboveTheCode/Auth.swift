@@ -24,7 +24,7 @@ import Hegel
 /// And the refresh failing:
 ///
 ///      ─0 gets 401─▶   [creds: ⟨a0,f0⟩, reqs: {0: waiting, 1: sent a0}, refreshing: f0]
-///      ─refresh fails─▶ [creds: out, reqs: {1: sent a0}, refreshing: no, done: {0: failed}]
+///      ─refresh rejected─▶ [creds: out, reqs: {1: sent a0}, refreshing: no, done: {0: failed}]
 ///      ─1 gets 401─▶   [creds: out, reqs: {}, done: {0: failed, 1: failed}]
 ///
 /// Two variables had to be written in for the rows to follow from the
@@ -51,12 +51,25 @@ import Hegel
 ///                       else reqs′[i] = waiting ∧ refreshing′ = creds.refresh
 ///          ∨ Refreshed(c):  refreshing ≠ none ∧ c fresh ∧ creds′ = c ∧ refreshing′ = none
 ///                     ∧ reqs′ = [i ↦ if reqs[i] = waiting then sent(c.access) else reqs[i]]
-///          ∨ RefreshFailed:  refreshing ≠ none ∧ creds′ = out ∧ refreshing′ = none
+///          ∨ RefreshRejected:  refreshing ≠ none ∧ creds′ = out ∧ refreshing′ = none
 ///                     ∧ reqs′ = reqs ↾ sent ∧ done′ = done ∪ {i ↦ failed : reqs[i] = waiting}
 ///
 ///     Inv:  (refreshing ≠ none ⇔ creds ≠ out ∧ creds.access ∈ rejected)
 ///         ∧ (refreshing ≠ none ⇒ refreshing = creds.refresh)
 ///         ∧ (∃ i: reqs[i] = waiting ⇒ refreshing ≠ none)
+///
+/// The product decision the first report left open: a refresh that fails
+/// from the network, where the server may or may not have consumed the
+/// token, is not a rejection. Decided: retry once with the same token,
+/// then sign out. Rotation servers keep a grace window for this replay,
+/// and signing out on a dropped connection is the complaint every app
+/// with rotation gets. `retried` bounds it at one.
+///
+///     RefreshUnreachable:  refreshing ≠ none
+///                    ∧ if ¬retried then retried′ = true ∧ UNCHANGED ⟨creds, refreshing, reqs, done⟩
+///                      else the RefreshRejected clause
+///     RefreshRejected:     … ∧ retried′ = false
+///     Refreshed(c):        … ∧ retried′ = false
 ///
 /// The bound. As first written, Next let a token rejected the moment it
 /// was issued refresh again, forever; Inv held on every state of that
@@ -124,7 +137,9 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
         case ok(Int)
         case unauthorized(Int)
         case refreshed(Credentials)
-        case refreshFailed
+        case refreshRejected
+        /// The refresh call did not reach the server, or its answer did not come back.
+        case refreshUnreachable
 
         public var description: String {
             switch self {
@@ -132,12 +147,13 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
             case .ok(let i): return "\(i) ok"
             case .unauthorized(let i): return "\(i) gets 401"
             case .refreshed(let c): return "refresh ok \(c)"
-            case .refreshFailed: return "refresh fails"
+            case .refreshRejected: return "refresh rejected"
+            case .refreshUnreachable: return "refresh unreachable"
             }
         }
     }
 
-    /// Which Unauthorized and RefreshFailed clauses. `checked` is the
+    /// Which Unauthorized and RefreshRejected clauses. `checked` is the
     /// design; the other two are wrong and refuted on drawn behaviours.
     public enum Design: Sendable, CaseIterable {
         /// A 401 refreshes whenever no refresh is in flight, whatever
@@ -165,6 +181,8 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
     /// The current access token came from a refresh and has not been
     /// accepted yet. The bound reads it.
     public var unproven: Bool
+    /// The refresh in flight is the retry after an unreachable one.
+    public var retried: Bool
 
     public init() {
         creds = Auth.credentials(0)
@@ -175,9 +193,10 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
         next = 0
         generation = 0
         unproven = false
+        retried = false
     }
     public init(creds: Credentials?, requests: [Int: Phase], refreshing: String?, rejected: Set<String>,
-                done: [Int: Outcome], next: Int, generation: Int, unproven: Bool = false) {
+                done: [Int: Outcome], next: Int, generation: Int, unproven: Bool = false, retried: Bool = false) {
         self.creds = creds
         self.requests = requests
         self.refreshing = refreshing
@@ -186,6 +205,7 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
         self.next = next
         self.generation = generation
         self.unproven = unproven
+        self.retried = retried
     }
 
     /// The g-th credential pair. The relation says only "fresh"; the
@@ -208,7 +228,7 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
         let reqs = requests.keys.sorted().map { "\($0): \(requests[$0]!)" }.joined(separator: ", ")
         let outcomes = done.keys.sorted().map { "\($0): \(done[$0]!)" }.joined(separator: ", ")
         return "creds = \(creds.map(\.description) ?? "out")\(unproven ? " unproven" : ""), reqs = {\(reqs)}, "
-            + "refreshing = \(refreshing ?? "no"), rejected = \(rejected.sorted()), done = {\(outcomes)}"
+            + "refreshing = \(refreshing ?? "no")\(retried ? " (retry)" : ""), rejected = \(rejected.sorted()), done = {\(outcomes)}"
     }
 
     // MARK: Next
@@ -221,7 +241,7 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
             if case .sent = requests[i] { return true } else { return false }
         case .refreshed(let c):
             return refreshing != nil && !rejected.contains(c.access) && c.refresh != refreshing
-        case .refreshFailed: return refreshing != nil
+        case .refreshRejected, .refreshUnreachable: return refreshing != nil
         }
     }
 
@@ -267,10 +287,14 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
             refreshing = nil
             generation += 1
             unproven = true
+            retried = false
             for (i, p) in requests where p == .waiting { requests[i] = .sent(c.access) }
-        case .refreshFailed:
+        case .refreshUnreachable where !retried:
+            retried = true
+        case .refreshRejected, .refreshUnreachable:
             if design != .staysSignedIn { creds = nil }
             refreshing = nil
+            retried = false
             for (i, p) in requests where p == .waiting {
                 requests[i] = nil
                 done[i] = .failed
@@ -298,7 +322,13 @@ public struct Auth: Equatable, Sendable, CustomStringConvertible {
             let i = inFlight[Int(try tc.drawInteger(in: 0...Int64(inFlight.count - 1)))]
             return try tc.drawBool() ? .unauthorized(i) : .ok(i)
         default:
-            return try tc.drawBool(probability: 0.3) ? .refreshFailed : .refreshed(Auth.credentials(generation + 1))
+            // Completion shrinks toward ok; a rejection is rarer than an
+            // unreachable one, which is the mobile case.
+            switch try tc.drawInteger(in: Int64(0)...9) {
+            case 0, 1: return .refreshUnreachable
+            case 2: return .refreshRejected
+            default: return .refreshed(Auth.credentials(generation + 1))
+            }
         }
     }
 

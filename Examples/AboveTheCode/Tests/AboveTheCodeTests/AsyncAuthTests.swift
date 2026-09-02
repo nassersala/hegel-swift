@@ -156,7 +156,7 @@ import os
                 log.record(.refreshed(fresh))
             case .failure:
                 credentials = nil
-                log.record(.refreshFailed)
+                log.record(.refreshRejected)
             }
             refreshInFlight = false
             let ws = waiters
@@ -288,7 +288,7 @@ import os
         let (schedule, run) = try #require(witness)
         print("double refresh, schedule \(schedule): \(run.events.map(\.description).joined(separator: ", ")); credentials \(run.credentials.map(\.description) ?? "out")")
         #expect(run.credentials == nil)
-        #expect(run.events.contains(.refreshFailed))
+        #expect(run.events.contains(.refreshRejected))
         #expect(run.results.contains { if case .failure = $0 { return true } else { return false } })
     }
 }

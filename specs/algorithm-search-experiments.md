@@ -279,15 +279,44 @@ and the run ends when each is handled. Applying it:
 |---|---|---|
 | no bound on refreshes | checkable | one variable (`unproven`) and one clause; the safety form as a temporal formula; the unbounded design refuted in four events, the session bug `refreshesForever` at step 3 |
 | steps are whole | checkable | actor session under drawn schedules; the planted `await` between check and claim exploited with one deviation; two further bugs found writing the correct version (claim behind a same-actor `await`; lost wakeup in the wait) |
-| refresh network failure versus rejection | product decision | not decided here; stated as two clauses of RefreshFailed for the owner to pick |
+| refresh network failure versus rejection | product decision | decided: retry once with the same token, then sign out (`RefreshUnreachable`, `retried`); rotation servers keep a grace window for the replay, and signing out on a dropped connection is the complaint every app with rotation gets; session bugs `givesUpOnFirstNetworkError` (step 2) and `retriesForever` (step 3) |
 | an app extension sharing the Keychain item | out of scope | breaks the one-session assumption; no check of the session finds it |
-| liveness: every issued request is answered | checkable, not in Hegel | `TLA/Auth.tla`, TLC: holds under weak fairness of the server, 263 states bounded, 529 unbounded; the trace property fails unbounded in the same four steps Hegel shrank to |
+| liveness: every issued request is answered | checkable, not in Hegel | `TLA/Auth.tla`, TLC: holds under weak fairness of the server, 311 states bounded, 716 unbounded; the trace property fails unbounded in the same four steps Hegel shrank to |
 
 The rule is now in the skill as step 6a and the end of step 7. What the
 scheduler found in the correct version is the finding: the relation was
 right, the synchronous session was right, and the actor session was wrong
 twice in ways the drawn behaviours cannot see, because a behaviour of the
 relation has no inside to its steps.
+
+## E6: an algorithm, after the skill changed
+
+Edit distance, run from the skill alone in a separate session after 6a and
+the verdict step were added. The prompt asked for the relation, three
+refinements including a parallel one under the scheduler, and Hegel
+checks; no README or memory edits.
+
+- The drawing appeared in the reply before any file, four minutes in,
+  on `"ab"` and `"b"` in an order that was neither the recursion's nor the
+  table's, with the "pick any" named at the row where two cells were
+  ready. Measure 1 observable, as the skill change intended.
+- The variable is `D`, a partial function from cells to values; its
+  domain is the set of filled cells, the `U` of this problem. No row
+  index, no `width`. The kill criterion, "fills the table row by row and
+  calls the index the variable", did not fire.
+- Three refinements, all checked: the recursion, the table, a task per
+  cell under 200 drawn schedules. A prediction the run refuted: the
+  recursion's trace would differ from the table's; in textbook call order
+  it is row-major and identical.
+- Step 6a applied unprompted: the planted `await` between read and write
+  was reasoned not to bite (`D` only grows) and then checked with a
+  controlled hop; the missing-wait bug was found at one deviation and
+  shown to hide under the default schedule.
+- The verdict list at the end had six items with verdicts: three checked
+  in the session, one product decision (`Character` versus scalar, taken
+  as the assumption and said so), two out of scope with the reason.
+
+Eleven minutes. Six tests, green alongside the rest of the example.
 
 ## Not claimed
 

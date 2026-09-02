@@ -21,8 +21,8 @@ None == -1       \* refreshing: no refresh in flight
 Absent == -2     \* reqs[i]: not in flight
 Waiting == -1    \* reqs[i]: held back until the refresh completes
 
-VARIABLES creds, reqs, refreshing, rejected, done, n, unproven
-vars == <<creds, reqs, refreshing, rejected, done, n, unproven>>
+VARIABLES creds, reqs, refreshing, rejected, done, n, unproven, retried
+vars == <<creds, reqs, refreshing, rejected, done, n, unproven, retried>>
 
 TypeOK ==
   /\ creds \in -1..G
@@ -32,6 +32,7 @@ TypeOK ==
   /\ done \in [Ids -> {"none", "ok", "failed"}]
   /\ n \in 0..N
   /\ unproven \in BOOLEAN
+  /\ retried \in BOOLEAN
 
 Init ==
   /\ creds = 0
@@ -41,6 +42,7 @@ Init ==
   /\ done = [i \in Ids |-> "none"]
   /\ n = 0
   /\ unproven = FALSE
+  /\ retried = FALSE
 
 Sent(i) == reqs[i] >= 0
 Issued(i) == i < n
@@ -55,7 +57,7 @@ Send ==
             /\ UNCHANGED reqs
        ELSE /\ reqs' = [reqs EXCEPT ![n] = IF refreshing = None THEN creds ELSE Waiting]
             /\ UNCHANGED done
-  /\ UNCHANGED <<creds, refreshing, rejected, unproven>>
+  /\ UNCHANGED <<creds, refreshing, rejected, unproven, retried>>
 
 (* A 200. An ok under the current token is the proof the bound waits for. *)
 Ok(i) ==
@@ -63,13 +65,13 @@ Ok(i) ==
   /\ reqs' = [reqs EXCEPT ![i] = Absent]
   /\ done' = [done EXCEPT ![i] = "ok"]
   /\ unproven' = IF reqs[i] = creds THEN FALSE ELSE unproven
-  /\ UNCHANGED <<creds, refreshing, rejected, n>>
+  /\ UNCHANGED <<creds, refreshing, rejected, n, retried>>
 
 (* A 401, answered by which token the request went out under. *)
 Unauthorized(i) ==
   /\ Sent(i)
   /\ rejected' = rejected \cup {reqs[i]}
-  /\ UNCHANGED n
+  /\ UNCHANGED <<n, retried>>
   /\ IF creds = Out THEN
        /\ reqs' = [reqs EXCEPT ![i] = Absent]
        /\ done' = [done EXCEPT ![i] = "failed"]
@@ -97,17 +99,28 @@ Refreshed ==
   /\ creds' = creds + 1
   /\ refreshing' = None
   /\ unproven' = TRUE
+  /\ retried' = FALSE
   /\ reqs' = [i \in Ids |-> IF reqs[i] = Waiting THEN creds + 1 ELSE reqs[i]]
   /\ UNCHANGED <<rejected, done, n>>
 
-(* The refresh is rejected: signed out, the queue fails. *)
-RefreshFailed ==
+(* The server rejects the refresh: signed out, the queue fails. *)
+RefreshRejected ==
   /\ refreshing # None
   /\ creds' = Out
   /\ refreshing' = None
+  /\ retried' = FALSE
   /\ reqs' = [i \in Ids |-> IF reqs[i] = Waiting THEN Absent ELSE reqs[i]]
   /\ done' = [i \in Ids |-> IF reqs[i] = Waiting THEN "failed" ELSE done[i]]
   /\ UNCHANGED <<rejected, n, unproven>>
+
+(* The refresh call did not come back. The decision: once, retry with
+   the same token, the refresh stays in flight; twice, as a rejection. *)
+RefreshUnreachable ==
+  /\ refreshing # None
+  /\ IF ~retried
+       THEN /\ retried' = TRUE
+            /\ UNCHANGED <<creds, reqs, refreshing, rejected, done, n, unproven>>
+       ELSE RefreshRejected
 
 Settled == n = N /\ \A i \in Ids : done[i] # "none"
 
@@ -118,7 +131,8 @@ Terminating == Settled /\ UNCHANGED vars
    it may stop sending. *)
 Env == \/ \E i \in Ids : Ok(i) \/ Unauthorized(i)
        \/ Refreshed
-       \/ RefreshFailed
+       \/ RefreshRejected
+       \/ RefreshUnreachable
 
 Next == Send \/ Env \/ Terminating
 
@@ -133,6 +147,7 @@ Inv ==
   /\ (refreshing # None) <=> (creds # Out /\ creds \in rejected)
   /\ (refreshing # None) => (refreshing = creds)
   /\ (\E i \in Ids : reqs[i] = Waiting) => (refreshing # None)
+  /\ retried => (refreshing # None)
 
 (* The bound as a trace property. Auth.swift's formula is
    always(refreshStarts => weakNext(weakUntil(!refreshStarts, proof)));

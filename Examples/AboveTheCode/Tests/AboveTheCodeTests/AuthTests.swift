@@ -41,10 +41,29 @@ import AboveTheCode
                 #expect(!run.states[k].rejected.contains("a1"))
             case .staysSignedIn:
                 #expect(k == 2)
-                #expect(run.events[...k] == [.send, .unauthorized(0), .refreshFailed])
+                #expect(run.events[...k] == [.send, .unauthorized(0), .refreshRejected])
                 #expect(run.states[k].creds == Auth.credentials(0))
                 #expect(run.states[k].refreshing == nil)
             case .unbounded, .checked: break
+            }
+        }
+    }
+
+    /// The decision: one retry with the same token after an unreachable
+    /// refresh, then sign out. Drawn behaviours reach both.
+    @Test(.propertyTesting) func anUnreachableRefreshIsRetriedOnce() {
+        expectAll(Auth.behaviour(), testCases: 1000, database: "") { run in
+            var s = Auth()
+            for e in run.events {
+                let before = s
+                s.apply(e)
+                if e == .refreshUnreachable {
+                    if before.retried {
+                        #expect(s.creds == nil && s.refreshing == nil, "\(before) → \(s)")
+                    } else {
+                        #expect(s.retried && s.refreshing == before.refreshing && s.creds == before.creds, "\(before) → \(s)")
+                    }
+                }
             }
         }
     }
@@ -123,7 +142,7 @@ import AboveTheCode
                 #expect(v.got?.requests[0] == .sent("a0"))
             case .dropsWaitersOnFailure:
                 #expect(v.step == 2)
-                #expect(run.events[...2] == [.send, .unauthorized(0), .refreshFailed])
+                #expect(run.events[...2] == [.send, .unauthorized(0), .refreshRejected])
                 #expect(v.got?.done[0] == nil && v.got?.requests[0] == nil)
             case .forgetsRotatedRefreshToken:
                 #expect(v.step == 2)
@@ -131,20 +150,28 @@ import AboveTheCode
                 #expect(v.got?.creds == Auth.Credentials(access: "a1", refresh: "f0"))
             case .keepsCredentialsOnRefreshFailure:
                 #expect(v.step == 2)
-                #expect(run.events[...2] == [.send, .unauthorized(0), .refreshFailed])
+                #expect(run.events[...2] == [.send, .unauthorized(0), .refreshRejected])
                 #expect(v.got?.creds == Auth.credentials(0))
             case .refreshesForever:
                 #expect(v.step == 3)
                 #expect(run.events[...3] == [.send, .unauthorized(0), .refreshed(Auth.credentials(1)), .unauthorized(0)])
                 #expect(v.got?.refreshing == "f1")
                 #expect(v.expected.creds == nil)
+            case .givesUpOnFirstNetworkError:
+                #expect(v.step == 2)
+                #expect(run.events[...2] == [.send, .unauthorized(0), .refreshUnreachable])
+                #expect(v.got?.creds == nil && v.expected.retried)
+            case .retriesForever:
+                #expect(v.step == 3)
+                #expect(run.events[...3] == [.send, .unauthorized(0), .refreshUnreachable, .refreshUnreachable])
+                #expect(v.got?.refreshing == "f0" && v.expected.creds == nil)
             }
         }
     }
 
     /// Two of the bugs are not coding slips: each buggy session is a
     /// behaviour of the wrong design it came from. The bug is above the
-    /// code, in the Unauthorized or RefreshFailed clause.
+    /// code, in the Unauthorized or RefreshRejected clause.
     @Test(.propertyTesting, arguments: [
         (AuthSession.Bug.ignoresStaleness, Auth.Design.refreshesOnEvery401),
         (.keepsCredentialsOnRefreshFailure, .staysSignedIn),

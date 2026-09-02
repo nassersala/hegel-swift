@@ -47,6 +47,10 @@ public final class AuthSession {
         /// No bound: a 401 on the token the last refresh returned
         /// refreshes again, and again.
         case refreshesForever
+        /// A dropped connection on the refresh call signs out at once.
+        case givesUpOnFirstNetworkError
+        /// A dropped connection retries with the same token, every time.
+        case retriesForever
     }
 
     /// `nil` is signed out.
@@ -68,6 +72,8 @@ public final class AuthSession {
 
     private var waiting: [Waiter] = []
     private var refreshInFlight = false
+    /// The refresh in flight is the one retry after an unreachable call.
+    public private(set) var refreshRetried = false
     private let transport: any AuthTransport
     private let bug: Bug?
 
@@ -117,12 +123,21 @@ public final class AuthSession {
             }
             waiting.append(Waiter(request: request, token: token, deliver: deliver))
             refreshInFlight = true
+            refreshRetried = false
             transport.refresh(credentials.refresh) { [weak self] result in self?.refreshed(result) }
         }
     }
 
-    private func refreshed(_ result: Result<Auth.Credentials, any Error>) {
+    private func refreshed(_ result: Result<Auth.Credentials, RefreshError>) {
+        if case .failure(.unreachable) = result, let credentials,
+           bug != .givesUpOnFirstNetworkError, !refreshRetried || bug == .retriesForever {
+            // Once, with the same token: the server may not have consumed it.
+            refreshRetried = true
+            transport.refresh(credentials.refresh) { [weak self] result in self?.refreshed(result) }
+            return
+        }
         refreshInFlight = false
+        refreshRetried = false
         let waiters = waiting
         waiting = []
         switch result {
@@ -150,7 +165,13 @@ public protocol AuthTransport: AnyObject {
     /// when the response arrives, on the session's thread.
     func send(_ request: AuthSession.Request, accessToken: String, deliver: @escaping (Status) -> Void)
     /// Trades `refreshToken` for a new pair. `deliver` is called once.
-    func refresh(_ refreshToken: String, deliver: @escaping (Result<Auth.Credentials, any Error>) -> Void)
+    func refresh(_ refreshToken: String, deliver: @escaping (Result<Auth.Credentials, RefreshError>) -> Void)
+}
+
+/// How a refresh call fails: the server said no, or nothing came back.
+public enum RefreshError: Error, Sendable, Equatable {
+    case rejected
+    case unreachable
 }
 
 public enum AuthTransportStatus: Sendable {
@@ -162,10 +183,6 @@ public enum AuthTransportStatus: Sendable {
 /// It records what it was asked, which is what the refinement mapping
 /// reads: the calls in flight and the tokens they carry.
 public final class FakeAPI: AuthTransport {
-    public struct RefreshRejected: Error, CustomStringConvertible {
-        public var description: String { "refresh rejected" }
-    }
-
     private struct Call {
         let request: AuthSession.Request
         let token: String
@@ -173,7 +190,7 @@ public final class FakeAPI: AuthTransport {
     }
 
     private var calls: [Call] = []
-    private var refreshes: [(token: String, deliver: (Result<Auth.Credentials, any Error>) -> Void)] = []
+    private var refreshes: [(token: String, deliver: (Result<Auth.Credentials, RefreshError>) -> Void)] = []
     /// Access tokens this server has answered 401 to.
     public private(set) var rejected: Set<String> = []
     /// Credential pairs this server has issued.
@@ -194,7 +211,7 @@ public final class FakeAPI: AuthTransport {
         calls.append(Call(request: request, token: accessToken, deliver: deliver))
     }
 
-    public func refresh(_ refreshToken: String, deliver: @escaping (Result<Auth.Credentials, any Error>) -> Void) {
+    public func refresh(_ refreshToken: String, deliver: @escaping (Result<Auth.Credentials, RefreshError>) -> Void) {
         refreshes.append((refreshToken, deliver))
     }
 
@@ -213,7 +230,7 @@ public final class FakeAPI: AuthTransport {
     /// Completes the one refresh in flight. Returns false when there is
     /// not exactly one.
     @discardableResult
-    public func completeRefresh(_ result: Result<Auth.Credentials, any Error>) -> Bool {
+    public func completeRefresh(_ result: Result<Auth.Credentials, RefreshError>) -> Bool {
         guard refreshes.count == 1 else { return false }
         let r = refreshes.removeFirst()
         if case .success = result { issued += 1 }
@@ -242,7 +259,7 @@ extension Auth {
         guard api.refreshing.count <= 1 else { return (nil, "the code has \(api.refreshing.count) refreshes in flight") }
         return (Auth(creds: session.credentials, requests: requests, refreshing: api.refreshing.first,
                      rejected: api.rejected, done: delivered, next: sent, generation: api.issued,
-                     unproven: session.unproven), nil)
+                     unproven: session.unproven, retried: session.refreshRetried), nil)
     }
 
     public struct Violation: CustomStringConvertible, Sendable {
@@ -296,8 +313,10 @@ extension Auth {
                 if !api.answer(id, .unauthorized) { missing = "the code has no single call in flight for request \(id)" }
             case .refreshed(let c):
                 if !api.completeRefresh(.success(c)) { missing = "the code has no single refresh in flight" }
-            case .refreshFailed:
-                if !api.completeRefresh(.failure(FakeAPI.RefreshRejected())) { missing = "the code has no single refresh in flight" }
+            case .refreshRejected:
+                if !api.completeRefresh(.failure(.rejected)) { missing = "the code has no single refresh in flight" }
+            case .refreshUnreachable:
+                if !api.completeRefresh(.failure(.unreachable)) { missing = "the code has no single refresh in flight" }
             }
             let (got, reason) = project(session, api, delivered: delivered, sent: sent)
             if let missing {
