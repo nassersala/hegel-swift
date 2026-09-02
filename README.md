@@ -453,6 +453,28 @@ xcodebuild test -scheme AffordanceProperties-Package -destination 'platform=iOS 
 
 When this property fails in a real product, the user is in Norman's "gulf of execution": the interface misrepresents what the system will do. The Therac-25 accidents were this property violated with a beam button. The model here follows earlier work connecting cleanroom sequence specification (Prowell), affordance theory (Norman), and property-based testing; the state machine and the planted bug are ported from a Python/Hypothesis study of the same idea.
 
+The same claim in time, under drawn schedules (`Examples/ScheduleProperties`, `AffordanceTests.swift`): a submit button is disabled while a submission is in flight, so between an accepted tap and its completion no tap may see it enabled, and a tap that saw it disabled gets feedback. The invariant above checks the affordances at every state of a synchronous session; these formulas check them at every step of an interleaving, where the wait is:
+
+```swift
+let tellsTheTruth: Pred<Step> = always(.event("tap", { $0 == 1 }) => weakNext(weakUntil(!.event("tap", { $0 == 1 }), .event("completed"))))
+let feedback: Pred<Step>      = always(.event("tap", { $0 == 0 }) => weakNext(.event("rejected")))
+```
+
+The buggy view model disables the button after its validation hop instead of at the tap. A second tap that runs while the first is suspended there sees the button enabled, and both submit. Hegel finds the schedule and shrinks it to one deviation; the report is the second tap:
+
+```
+minimal schedule: at choice point 2 run ready[0]
+G(✓tap(1) ⇒ X(¬✓tap(1) W ✓completed)) fails at step 7
+> event form tap 1
+  event form tap 1
+  event form submit 1
+  event form completed 1
+  event form submit 2
+  event form completed 2
+```
+
+Disabling at the tap, before any `await`, holds both formulas under every schedule. Two submissions stay legal when the second tap comes after the first completed; the formulas say so, a count would not.
+
 ## Example: the Swift regex engine, compiler-style
 
 `Examples/RegexProperties` does to `Regex` what EMI (Le, Afshari, Su, PLDI 2014) does to GCC and GraphicsFuzz (Donaldson et al., OOPSLA 2017) does to shader compilers: rewrite the program without changing its meaning and require the same output. The program is a small regex AST the engine generates (`a–c`, classes, `|`, `*+?`, `{m,n}`, groups); the rewrites are identities applied at an engine-chosen node; the output is every match range plus whole-match, in a text drawn to match the pattern half the time:
