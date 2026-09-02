@@ -10,10 +10,22 @@
 /// side holds to the end of the trace), and `not(eventually p)` is
 /// `always(not p)`.
 ///
-/// End-of-trace conventions, as in PropRatt's evaluator: `next` is true
-/// at the last position; `weakUntil` at the last position is `q ∨ p`;
-/// `prev` and `changed` are false at position 0 (PropRatt rejects `prev` there); every
-/// formula is true on the empty trace.
+/// End-of-trace conventions, as in PropRatt's evaluator: `weakNext` is
+/// true at the last position; `weakUntil` at the last position is
+/// `q ∨ p`; `prev` and `changed` are false at position 0 (PropRatt
+/// rejects `prev` there); every formula is true on the empty trace.
+///
+/// The weak operators carry the word, as `weakUntil` does, because
+/// negation flips the convention: `!weakNext(p)` is `strongNext(!p)`, it
+/// demands a next position and fails on every trace that ends where it
+/// is asked. "After a check, the next step is not a check" is
+/// `always(check => weakNext(!check))`, with the negation on the atom;
+/// `always(check => !weakNext(check))` fails on any trace ending in a
+/// check. Keep the weak operators in positive position; where the strong
+/// reading is meant, `strongNext` says so. `prev` is strong by
+/// construction, false with no predecessor, and has no weak twin: a
+/// safety formula never wants "true because there was no yesterday" as
+/// a premise.
 public indirect enum Pred<State>: Sendable {
     /// An atom: the state at this position.
     case now(@Sendable (State) -> Bool)
@@ -24,8 +36,12 @@ public indirect enum Pred<State>: Sendable {
     case and(Pred, Pred)
     case or(Pred, Pred)
     case implies(Pred, Pred)
-    /// Holds at the following position (true at the last one).
-    case next(Pred)
+    /// Holds at the following position, or there is none (true at the
+    /// last position). PropRatt's `X`.
+    case weakNext(Pred)
+    /// Holds at the following position, and there is one (false at the
+    /// last position). The dual: `!weakNext(p)` is `strongNext(!p)`.
+    case strongNext(Pred)
     /// Holds here and at every later position.
     case always(Pred)
     /// The left side holds at every position until the first where the
@@ -54,7 +70,8 @@ public indirect enum Pred<State>: Sendable {
         case .and(let p, let q): return p.holds(at: position, in: trace) && q.holds(at: position, in: trace)
         case .or(let p, let q): return p.holds(at: position, in: trace) || q.holds(at: position, in: trace)
         case .implies(let p, let q): return !p.holds(at: position, in: trace) || q.holds(at: position, in: trace)
-        case .next(let p): return last || p.holds(at: position + 1, in: trace)
+        case .weakNext(let p): return last || p.holds(at: position + 1, in: trace)
+        case .strongNext(let p): return !last && p.holds(at: position + 1, in: trace)
         case .always(let p):
             var i = position
             while i < trace.count {
@@ -78,7 +95,8 @@ public indirect enum Pred<State>: Sendable {
 infix operator =>: TernaryPrecedence
 
 public func always<State>(_ p: Pred<State>) -> Pred<State> { .always(p) }
-public func next<State>(_ p: Pred<State>) -> Pred<State> { .next(p) }
+public func weakNext<State>(_ p: Pred<State>) -> Pred<State> { .weakNext(p) }
+public func strongNext<State>(_ p: Pred<State>) -> Pred<State> { .strongNext(p) }
 public func prev<State>(_ p: Pred<State>) -> Pred<State> { .prev(p) }
 public func weakUntil<State>(_ p: Pred<State>, _ q: Pred<State>) -> Pred<State> { .weakUntil(p, q) }
 public func now<State>(_ atom: @escaping @Sendable (State) -> Bool) -> Pred<State> { .now(atom) }

@@ -570,7 +570,7 @@ The lost wakeup in `ThresholdCell.read` (`Examples/Quicksort`) needed three exac
 
 ### Temporal formulas over the trace
 
-A schedule property can be a formula instead of a loop over the trace. `Pred<State>` is linear temporal logic over a finite trace of states, PropRatt's operator set (Nielsen, Kristiansen & Bahr, PADL 2026): atoms are closures, `always`, `next`, `weakUntil`, `prev`, and `changed` for `prev x < x`. The clock law of the controlled scheduler, time moves only when nothing is left ready and strictly forward:
+A schedule property can be a formula instead of a loop over the trace. `Pred<State>` is linear temporal logic over a finite trace of states, PropRatt's operator set (Nielsen, Kristiansen & Bahr, PADL 2026): atoms are closures, `always`, `weakNext`, `weakUntil`, `prev`, and `changed` for `prev x < x`. The clock law of the controlled scheduler, time moves only when nothing is left ready and strictly forward:
 
 ```swift
 let steps = Step.parse(scheduler.trace)   // one Step per trace line: kind, lane, ready set, now
@@ -581,14 +581,14 @@ let clockLaw: Pred<Step> = always(
 firstFailure(of: clockLaw, over: steps)   // the offending step, for the report
 ```
 
-`ticked(lane)` is PropRatt's `✓sigₙ`: the step is the state, so "a job ran on this lane" is an atom. The escape tests state their safety half the same way, `next(weakUntil(!.ticked(.run), .ticked("tasks")))`: after the root step nothing runs until the resumption comes back.
+`ticked(lane)` is PropRatt's `✓sigₙ`: the step is the state, so "a job ran on this lane" is an atom. The escape tests state their safety half the same way, `weakNext(weakUntil(!.ticked(.run), .ticked("tasks")))`: after the root step nothing runs until the resumption comes back.
 
-Only safety is testable on a finite trace. There is no `eventually`: a formula that can only be refuted by an infinite trace passes every test and proves nothing. `until` is weak (the right side may never arrive), `next` is true at the last position, `prev` is false at position 0, and `not(eventually p)` is `always(not p)`. The liveness half of the escape tests, "the resumption does come back", stays what it was: `outcome == .completed` within a 2 s grace, a bounded surrogate whose bound is wall time.
+Only safety is testable on a finite trace. There is no `eventually`: a formula that can only be refuted by an infinite trace passes every test and proves nothing. `until` is weak (the right side may never arrive), `weakNext` is true at the last position, `prev` is false at position 0, and `not(eventually p)` is `always(not p)`. The weak operators carry the word because negation flips the convention: `!weakNext(p)` demands a next step and fails on any trace that ends where it is asked, so "after a check, the next step is not a check" is `always(check => weakNext(!check))`, with the negation on the atom; `strongNext` is the explicit dual for the rare formula that means it. The liveness half of the escape tests, "the resumption does come back", stays what it was: `outcome == .completed` within a 2 s grace, a bounded surrogate whose bound is wall time.
 
 Job ids say which job ran; they do not say what it did. Code under test records that with `scheduler.note("commit \(balance)")`, an `event` line in step order, and the race becomes two formulas over the event trace: the damage, `G(✓commit ⇒ balance ≥ 0)`, and the mechanism, no second check between a check and its commit:
 
 ```swift
-let atomicity: Pred<Step> = always(.event("check") => next(weakUntil(!.event("check"), .event("commit"))))
+let atomicity: Pred<Step> = always(.event("check") => weakNext(weakUntil(!.event("check"), .event("commit"))))
 ```
 
 The buggy `withdraw` fails both under the one-deviation schedule; `withdrawSafely` holds both under every schedule. The report is the offending step in its context:

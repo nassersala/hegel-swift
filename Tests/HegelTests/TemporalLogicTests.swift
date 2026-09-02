@@ -3,7 +3,7 @@ import Testing
 
 /// Each operator on a hand-written trace, including the end-of-trace
 /// conventions: weak until with a right side that never arrives, `prev`
-/// at position 0, `next` at the last position.
+/// at position 0, `weakNext` at the last position.
 @Suite struct TemporalLogic {
     let positive: Pred<Int> = now { $0 > 0 }
     let even: Pred<Int> = now { $0 % 2 == 0 }
@@ -27,11 +27,24 @@ import Testing
         #expect(evaluate(always(positive), over: []))
     }
 
-    @Test func nextLooksOneAhead() {
-        #expect(evaluate(next(positive), over: [-1, 1]))
-        #expect(!evaluate(next(positive), over: [1, -1]))
-        #expect(evaluate(next(positive), over: [-1]))  // last position: true
-        #expect(evaluate(always(even => next(positive)), over: [2, 1, 4]))
+    @Test func weakNextLooksOneAhead() {
+        #expect(evaluate(weakNext(positive), over: [-1, 1]))
+        #expect(!evaluate(weakNext(positive), over: [1, -1]))
+        #expect(evaluate(weakNext(positive), over: [-1]))  // last position: true
+        #expect(evaluate(always(even => weakNext(positive)), over: [2, 1, 4]))
+    }
+
+    /// `weakNext` is weak, so its negation is strong: `!weakNext(p)` needs
+    /// a next position and fails on a trace that ends here. The safety
+    /// spelling puts the negation inside; `strongNext` is the explicit dual.
+    @Test func negatedNextIsStrong() {
+        let one: Pred<Int> = now { $0 == 1 }
+        let two: Pred<Int> = now { $0 == 2 }
+        #expect(evaluate(always(one => !weakNext(two)), over: [1, 3]))
+        #expect(!evaluate(always(one => !weakNext(two)), over: [1]))      // ends in a 1: no next step
+        #expect(evaluate(always(one => weakNext(!two)), over: [1]))       // the safety spelling
+        #expect(!evaluate(strongNext(positive), over: [1]))
+        #expect(evaluate(strongNext(positive), over: [1, 2]))
     }
 
     @Test func weakUntilHoldsWhenTheRightSideNeverHappens() {
@@ -54,9 +67,9 @@ import Testing
     @Test func changedComparesWithThePreviousState() {
         let grew: Pred<Int> = changed { $0 < $1 }
         #expect(!evaluate(grew, over: [1, 2]))  // position 0: no previous
-        #expect(evaluate(next(grew), over: [1, 2]))
-        #expect(evaluate(always(next(grew)), over: [1, 2, 3]))
-        #expect(!evaluate(always(next(grew)), over: [1, 3, 2]))
-        #expect(firstFailure(of: always(next(grew)), over: [1, 3, 2]) == 1)
+        #expect(evaluate(weakNext(grew), over: [1, 2]))
+        #expect(evaluate(always(weakNext(grew)), over: [1, 2, 3]))
+        #expect(!evaluate(always(weakNext(grew)), over: [1, 3, 2]))
+        #expect(firstFailure(of: always(weakNext(grew)), over: [1, 3, 2]) == 1)
     }
 }

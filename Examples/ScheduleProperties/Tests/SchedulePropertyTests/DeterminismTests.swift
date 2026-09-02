@@ -97,7 +97,7 @@ import Schedules
         }
         if case .completed = outcome {} else { Issue.record("\(outcome)") }
         let runs = Step.parse(scheduler.trace).filter { $0.kind == .run }
-        #expect(evaluate(next(weakUntil(!.ticked(.run), .ticked("tasks"))), over: runs))
+        #expect(evaluate(weakNext(weakUntil(!.ticked(.run), .ticked("tasks"))), over: runs))
         #expect(runs.count == 2)
     }
 
@@ -232,3 +232,35 @@ import Schedules
         #expect(scheduler.now == .seconds(2))
     }
 }
+
+/// `Step.parse` recovers the ready set and the clock from trace lines by
+/// string-splitting. A format drift would make the ready set empty and
+/// the clock law's premise vacuous (a false green), so the parse is
+/// pinned on lines in the scheduler's exact format.
+@Suite struct TraceParsing {
+    @Test func readySetAndClockAreRecovered() {
+        let steps = Step.parse([
+            "enqueue #1@tasks",
+            "run #1@tasks",
+            "run #3@account (ready: [#1@tasks, #2@auditor])",
+            "advance to 3.0 seconds, firing #1",
+            "event account commit -100",
+        ])
+        #expect(steps.count == 5)
+        #expect(steps[1].kind == .run && steps[1].ready == [])
+        #expect(steps[2].kind == .run && steps[2].id == 3 && steps[2].lane == "account")
+        #expect(steps[2].ready == ["tasks", "auditor"])
+        #expect(steps[3].kind == .advance && steps[3].now == .seconds(3))
+        #expect(steps[4].kind == .event && steps[4].event == ["account", "commit", "-100"])
+        #expect(steps[4].now == .seconds(3))
+    }
+
+    /// The pinned format is the scheduler's: a real run reaches a choice
+    /// point, so some run line carries a non-empty ready set.
+    @Test func aRealRunLineHasItsReadySet() {
+        let (_, _, trace) = twoWithdrawals(Scheduler.fifo)
+        #expect(trace.contains { $0.contains("(ready: [") })
+        #expect(Step.parse(trace).contains { $0.kind == .run && !$0.ready.isEmpty })
+    }
+}
+

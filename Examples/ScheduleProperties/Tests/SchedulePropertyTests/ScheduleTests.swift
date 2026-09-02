@@ -62,7 +62,7 @@ import Schedules
     /// it on every schedule. `weakUntil` because a trace that ends
     /// before the commit is not a violation.
     @Test func noCheckBetweenCheckAndCommit() throws {
-        let atomicity: Pred<Step> = always(.event("check") => next(weakUntil(!.event("check"), .event("commit"))))
+        let atomicity: Pred<Step> = always(.event("check") => weakNext(weakUntil(!.event("check"), .event("commit"))))
         let racing = Schedule(deviations: [.init(choice: 2, index: 0)])
         #expect(throws: TemporalViolation.self) {
             try check("atomicity", atomicity, over: twoWithdrawals(racing.policy).trace)

@@ -55,7 +55,7 @@ Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
    "no second check between a check and its commit", which as a state
    predicate is "never two tasks checked at once". *)
 Solvent == balance >= 0
-NoDoubleCheck == ~(\A t \in Tasks : phase[t] = "checked")
+NoDoubleCheck == ~(\E t1, t2 \in Tasks : t1 # t2 /\ phase[t1] = "checked" /\ phase[t2] = "checked")
 
 (* Liveness, provable here and only a bounded surrogate in Swift:
    under weak fairness both withdrawals finish. *)
