@@ -76,8 +76,8 @@ jobs:
           -derivedDataPath .build/dd-ios-sim
 
   conformance:
-    # Differential conformance vs hegel-go: same seed, same engine binary,
-    # transcripts must match byte for byte.
+    # Differential conformance vs hegel-go and hegel-rust: same seed, same
+    # engine version, transcripts must match byte for byte.
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -87,7 +87,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      - name: Compare draw transcripts with hegel-go
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compare draw transcripts with hegel-go and hegel-rust
         run: Scripts/conformance.sh
 
   foundation-6-4:

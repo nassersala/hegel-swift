@@ -134,7 +134,7 @@ extension Scheduled { @Suite struct TwoPhase {
     /// the spec's: `Decide(p0, commit)` is not enabled, p0 is working.
     @Test func commitOnTimeoutShrinksToOneDroppedPrepare() throws {
         do {
-            try forAll(Hegel.zip(Self.votes, Self.faults, Self.schedules), seed: 5, database: "") { votes, faults, schedule in
+            try forAll(Hegel.zip(Self.votes, Self.faults, Self.schedules), seed: 1, database: "") { votes, faults, schedule in
                 let run = twoPhaseCommit(votes: votes, faults: faults, bug: .commitOnTimeout, policy: schedule.policy)
                 try Self.refines(run)
             }
@@ -160,7 +160,7 @@ extension Scheduled { @Suite struct TwoPhase {
     /// found, since removing a participant renumbers the messages.
     @Test func heuristicAbortDisagrees() throws {
         do {
-            try forAll(Hegel.zip(Self.votes, Self.faults, Self.schedules), testCases: 500, seed: 2, database: "") { votes, faults, schedule in
+            try forAll(Hegel.zip(Self.votes, Self.faults, Self.schedules), testCases: 500, seed: 1, database: "") { votes, faults, schedule in
                 let run = twoPhaseCommit(votes: votes, faults: faults, bug: .heuristicAbort, retries: 1, policy: schedule.policy)
                 try Self.refines(run)
             }

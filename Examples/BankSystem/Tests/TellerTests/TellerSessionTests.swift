@@ -223,7 +223,7 @@ import os
 
     static func shrunkFailure(bug: TellerSession.Bug) throws -> (Scenario, Schedule, Run) {
         do {
-            try forAll(Self.inputs, testCases: 500, seed: 1, database: "") { scenario, schedule in
+            try forAll(Self.inputs, testCases: 500, seed: 4, database: "") { scenario, schedule in
                 _ = try Self.checkRefines(Self.run(scenario, schedule, bug: bug))
             }
             throw NotFound()

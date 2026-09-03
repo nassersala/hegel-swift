@@ -139,11 +139,13 @@ let temperateScenario = scenario(latitudes: -55...55)
     /// A correct API would return nil (as it does elsewhere) or ordered
     /// times. This test documents the bug and prints Hegel's shrunk
     /// minimal counterexample; it will start failing if upstream fixes
-    /// it — then promote it to a real ordering property.
+    /// it — then promote it to a real ordering property. Seeded: unseeded
+    /// runs missed the band in 500 cases about one time in three, and
+    /// seed 7 shrinks to the case in the README.
     @Test func highLatitudeUnorderedTimesBugIsStillPresent() throws {
         let gen = scenario(latitudes: -75...75)
         do {
-            try forAll(gen, testCases: 500, database: "") { s in
+            try forAll(gen, testCases: 500, seed: 7, database: "") { s in
                 guard let p = PrayerTimes(
                     coordinates: s.coordinates, date: s.dateComponents,
                     calculationParameters: s.method.params) else {

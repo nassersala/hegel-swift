@@ -101,21 +101,27 @@ public struct TestCase {
 
     /// Draws a variable-length collection: libhegel decides the length
     /// (within `sizes`) so the shrinker can delete elements; `element` is
-    /// invoked once per element.
+    /// invoked once per element. The whole draw sits in a `HEGEL_LABEL_LIST`
+    /// span, as in the reference bindings: the engine's generation reads
+    /// span structure, so leaving it out changes the choice sequence (the
+    /// conformance harness diverged at case 11 of the lists program
+    /// without it).
     public func drawCollection<A>(
         count sizes: ClosedRange<UInt64>,
         element: () throws -> A
     ) throws -> [A] {
-        var collection: OpaquePointer?
-        try call(hegel_new_collection(ctx.raw, raw, sizes.lowerBound, sizes.upperBound, &collection))
-        defer { _ = hegel_collection_free(ctx.raw, collection) }
-        var out: [A] = []
-        while true {
-            var more = false
-            try call(hegel_collection_more(ctx.raw, raw, collection, &more))
-            guard more else { break }
-            out.append(try element())
+        try span(label: UInt64(HEGEL_LABEL_LIST.rawValue)) {
+            var collection: OpaquePointer?
+            try call(hegel_new_collection(ctx.raw, raw, sizes.lowerBound, sizes.upperBound, &collection))
+            defer { _ = hegel_collection_free(ctx.raw, collection) }
+            var out: [A] = []
+            while true {
+                var more = false
+                try call(hegel_collection_more(ctx.raw, raw, collection, &more))
+                guard more else { break }
+                out.append(try element())
+            }
+            return out
         }
-        return out
     }
 }

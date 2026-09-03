@@ -1,0 +1,11 @@
+[package]
+name = "transcript-rust"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# hegeltest 0.29.10 is the crate that bundles libhegel 0.32.5, the engine
+# version every other column loads (Vendor/CHegel.xcframework, hegel-go's
+# pin). This column links its own copy of that engine statically.
+[dependencies]
+hegeltest = "=0.29.10"
