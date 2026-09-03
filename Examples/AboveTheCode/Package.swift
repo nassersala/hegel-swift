@@ -14,6 +14,10 @@ import PackageDescription
 // session that refines it. A sixth is zero-downtime deployment from
 // Wlaschin's TLA+ talk: the balancer as the written-in variable, the
 // batch and the capacity bound read off the guard, two rollouts refining.
+// A seventh is a stream function under the fake clock: the relation says
+// what Lively RaTT's three modalities would have said, and the tester
+// recovers two of the three guarantees as refutations and the third as a
+// step budget.
 let package = Package(
     name: "AboveTheCode",
     platforms: [.macOS(.v15)],

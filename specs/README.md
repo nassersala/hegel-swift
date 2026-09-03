@@ -64,6 +64,7 @@ are evidence used by the design, not alternate semantic foundations.
 | `algorithm-search-experiments.md` | experiment draft | can the trace or a program search produce a sorting algorithm; Die Hard for sorting networks, Fung's grammar, refinement rounds |
 | `calculation-by-refutation.md` | method, evaluated | a poor man's proof assistant: derive a data type from its correctness equation with the unknowns partial, Hegel finding each stuck goal by refutation; what it is not, the three stops where a person decides, the `stuckGoal` API |
 | `joy-in-arabic.md` | experiment draft | Joy's semantics as the equation, a machine derived by refutation, then Kelley's and Hsu's layout ladder as refinements checked by von Thun's laws; Arabic script with harakat as modifiers and patterns as derived words, so the program reads in the order composition reads |
+| `modal-frp-by-testing.md` | experiment, run | what a tester recovers of Lively RaTT's three guarantees: causality and space as refutations, productivity as a bound |
 
 ## Shared vocabulary
 
