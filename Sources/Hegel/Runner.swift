@@ -28,6 +28,11 @@ public struct Failure: Sendable {
     /// The minimal counterexample itself, recovered by replaying the blob
     /// through the generator. `String(describing:)` of the value.
     public let counterexample: String?
+    /// What the property threw at this bug's minimal counterexample: the
+    /// last error the run saw under this origin, which is the shrinker's
+    /// final accepted case. `Stuck` here means the property reached a
+    /// hole rather than a wrong answer. nil when the run recorded none.
+    public let error: (any Error)?
 }
 
 /// Thrown by `forAll` when the property fails (with counterexamples) or the
@@ -40,6 +45,7 @@ public struct PropertyFailure: Error, CustomStringConvertible {
         if let runError { return "hegel run errored: \(runError)" }
         let lines = failures.map { f in
             "  counterexample: \(f.counterexample ?? "<unavailable>")"
+                + (f.error.map { "\n  \($0)" } ?? "")
                 + (f.reproduceBlob.map { "\n  reproduce blob: \($0)" } ?? "")
         }
         return "property failed with \(failures.count) distinct bug(s)\n"
@@ -85,6 +91,13 @@ final class Run<A> {
     private let outputBox: OutputBox?
     private let rawSettings: OpaquePointer?
     private var run: OpaquePointer?
+    /// The last error thrown under each bug origin. Interesting cases
+    /// under one origin arrive in shrink order, so the last one is the
+    /// minimal case the report shows (a cross-origin hit while shrinking
+    /// another bug under `reportMultipleFailures` can leave a larger
+    /// case's error here; the deterministic fix is to re-run the property
+    /// at the replayed value, as `expectAll` and `stuckGoal` do).
+    private var lastErrors: [String: any Error] = [:]
 
     init(
         gen: Gen<A>,
@@ -168,7 +181,9 @@ final class Run<A> {
             // Suffix the thrown error's type so different failure modes of
             // one property count as distinct bugs — that is what makes
             // reportMultipleFailures able to report more than one.
-            return (.interesting, "\(origin) [\(String(reflecting: type(of: error)))]")
+            let bugOrigin = "\(origin) [\(String(reflecting: type(of: error)))]"
+            lastErrors[bugOrigin] = error
+            return (.interesting, bugOrigin)
         }
     }
 
@@ -210,10 +225,12 @@ final class Run<A> {
                 let counterexample = blob.flatMap { b in
                     (try? replay(gen, blob: b, settings: settings)).map { String(describing: $0) }
                 }
+                let bugOrigin = originPtr.map { String(cString: $0) } ?? origin
                 failures.append(Failure(
-                    origin: originPtr.map { String(cString: $0) } ?? origin,
+                    origin: bugOrigin,
                     reproduceBlob: blob,
-                    counterexample: counterexample))
+                    counterexample: counterexample,
+                    error: lastErrors[bugOrigin]))
             }
             throw PropertyFailure(failures: failures, runError: nil)
         }
@@ -222,7 +239,7 @@ final class Run<A> {
 
 /// The convenience parameters override the corresponding Settings fields,
 /// so the common knobs stay one label away.
-private func resolve(
+func resolve(
     _ settings: Settings, testCases: UInt64?, seed: UInt64?, database: String?
 ) -> Settings {
     var settings = settings

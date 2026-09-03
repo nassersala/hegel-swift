@@ -11,7 +11,7 @@ import Wire
     /// refused case. Round 3: ⟦ wd 1 ⟧ 1 with n ≤ b, nothing born, the other
     /// case of `apply`. Then nothing is stuck: `send` is total.
     @Test func theStuckGoalsInOrder() throws {
-        var goals: [Stuck?] = []
+        var goals: [Wire.Stuck?] = []
         for born in Birth.allCases {
             let stuck = try Calculation.stuckGoal(born: born)
             print("\(born): \(stuck.map(\.description) ?? "nothing stuck")")

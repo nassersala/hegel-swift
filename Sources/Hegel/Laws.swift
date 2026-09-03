@@ -154,7 +154,11 @@ public func forAll(
             if let runError = failure.runError {
                 runErrors.append("\(law.name): \(runError)")
             } else {
-                failures.append(contentsOf: failure.failures)
+                // The LawCase already shows the violation; do not say it twice.
+                failures.append(contentsOf: failure.failures.map {
+                    Failure(origin: $0.origin, reproduceBlob: $0.reproduceBlob,
+                            counterexample: $0.counterexample, error: nil)
+                })
             }
         }
     }
