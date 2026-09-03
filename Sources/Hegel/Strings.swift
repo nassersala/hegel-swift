@@ -119,15 +119,19 @@ extension Gen where Value == String {
         categories: [String]? = nil,
         excludeCategories: [String]? = nil
     ) -> Gen {
-        Gen { tc in
-            // Built per draw: cheap relative to a test body, and keeps the
-            // closure Sendable without a lazy-cache. Revisit if profiling
-            // ever says otherwise.
-            let generator = try StringGenerator.text(
-                count: count, codec: codec, codepoints: codepoints,
-                categories: categories, excludeCategories: excludeCategories)
-            return try tc.drawString(using: generator)
-        }
+        // Built once, here, and shared by every draw. libhegel 0.32.5 keeps
+        // a process-global entry for every string generator ever created
+        // (constants_in_alphabet in hegel-c, keyed by the alphabet's
+        // address, never evicted), so building one per draw grew the
+        // process by about 2.5 MB per 50,000 draws and leaks --atExit
+        // reported 34,000 blocks after two runs of 1000 cases with 50
+        // draws each. The handle is immutable and Sendable, so capturing
+        // it keeps the closure Sendable; a construction error is thrown
+        // at the first draw, where it was thrown before.
+        let generator = Result { try StringGenerator.text(
+            count: count, codec: codec, codepoints: codepoints,
+            categories: categories, excludeCategories: excludeCategories) }
+        return Gen { tc in try tc.drawString(using: generator.get()) }
     }
 
     /// ASCII-only text.
@@ -144,21 +148,21 @@ extension Gen where Value == String {
 
     /// Strings matching a regular expression (Python `re` syntax).
     public static func regex(_ pattern: String, fullMatch: Bool = true) -> Gen {
-        Gen { tc in
-            let generator = try StringGenerator.regex(pattern, fullMatch: fullMatch)
-            return try tc.drawString(using: generator)
-        }
+        let generator = Result { try StringGenerator.regex(pattern, fullMatch: fullMatch) }
+        return Gen { tc in try tc.drawString(using: generator.get()) }
     }
 
     /// RFC-shaped email addresses.
-    public static let email = Gen { tc in
-        try tc.drawString(using: StringGenerator.email())
-    }
+    public static let email: Gen = {
+        let generator = Result { try StringGenerator.email() }
+        return Gen { tc in try tc.drawString(using: generator.get()) }
+    }()
 
     /// RFC 3986 http/https URLs.
-    public static let url = Gen { tc in
-        try tc.drawString(using: StringGenerator.url())
-    }
+    public static let url: Gen = {
+        let generator = Result { try StringGenerator.url() }
+        return Gen { tc in try tc.drawString(using: generator.get()) }
+    }()
 }
 
 /// Marshals an optional Swift string array as `const char *const *` + len.
