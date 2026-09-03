@@ -68,6 +68,17 @@ is stated, including the ones that do not change. Nondeterminism is not a
 defect; it is what makes the relation more general than any one program.
 Define the sets you use (`Partitions`) as sets, not procedures.
 
+Doing nothing is a step. Between any two rows a row can repeat, and the
+relation should allow it: an `idle` event, or TLA's `[][Next]_vars`,
+which stutters by construction. Say so in Next rather than leaving it to
+the reader. The consequence arrives in step 5: once idle is a step, every
+"eventually" the drawing promised (the upgrade completes, the queue
+drains, the counter reaches three) is no longer a property of any finite
+trace, because a behaviour that idles forever is a behaviour. Its bounded
+form is: every completed behaviour takes exactly this many non-idle
+steps, and that is checkable. The unbounded form is a fairness assumption
+on the environment, stated as `WF`, and it belongs to the TLA twin.
+
 ## 5. Check the relation with Hegel
 
 Write the relation as a Swift value before any algorithm:

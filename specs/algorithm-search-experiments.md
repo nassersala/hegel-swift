@@ -344,6 +344,41 @@ of it, write the correctness equation with the unknowns before drawing,
 and let the stuck goals name the constructors; draw when the meaning is a
 property of a trace. One line for the skill, not built yet.
 
+## E8: the deployment, from a talk
+
+Wlaschin's "TLA+ for programmers" (2023) runs Hillel Wayne's zero-downtime
+deployment through TLC three times, fixing by hand between runs. The
+question was whether the skill, applied to the same paragraph, produces
+anything the talk's rounds did not. `Deploy.swift`, `DeployTests.swift`,
+`AsyncDeployTests.swift`, `TLA/Deploy.tla`. Results:
+
+- The drawing wrote in the balancer at the row after the first finish,
+  and with it "online" became a set computed from the row rather than a
+  phase of a server. The guard that falls out, `|Online \ {s}| ≥ k`, is
+  not the talk's "nobody else offline"; it is a batch, and with `n = 5,
+  k = 2` drawn behaviours reach three offline at once and never four.
+- The relation has a precondition the talk does not state: `n ≥ 2k`.
+  Three servers for two online deadlocks after the first upgrade, in
+  Hegel as a state with only idle enabled and in TLC as a deadlock in
+  seven states. That is a capacity fact, derived.
+- The talk's two designs are refuted in two steps each on two servers,
+  each against the invariant the talk had at that round; `anyServer`
+  also fails same-version by two steps, and the shrinker prefers that
+  story, so the test names the round's invariant.
+- Two rollouts refine; three seeded bugs. Switching on the first v2
+  server is a step when `k = 1`, so its story needs `k = 2` and four
+  servers, which is a fact about the relation the test had to learn.
+- 6a, steps are whole: the guard as check-then-commit with an `await`
+  between passes the default schedule and is found at one deviation on
+  two servers, three events. The stutter, `idle`, is a step at every
+  state, so the trace says `2n + 1` non-idle steps and TLC says `<>[]Done`
+  under WF over 262 states.
+
+What the talk's method produced that this did not: nothing on this
+system. What this produced that the talk's did not: the batch and the
+capacity bound, both read off one clause. The cost is the drawing, about
+ten lines, before the relation.
+
 ## Not claimed
 
 - Hegel does not find the variables. The drawing and the reading are done by

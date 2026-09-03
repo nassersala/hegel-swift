@@ -11,7 +11,9 @@ import PackageDescription
 // in any order, and a SwiftUI-free view model that refines it. A fifth is
 // token refresh with rotation: the session's promise as a relation over
 // sends, 401s and refresh completions in any order, and a UIKit-free
-// session that refines it.
+// session that refines it. A sixth is zero-downtime deployment from
+// Wlaschin's TLA+ talk: the balancer as the written-in variable, the
+// batch and the capacity bound read off the guard, two rollouts refining.
 let package = Package(
     name: "AboveTheCode",
     platforms: [.macOS(.v15)],
