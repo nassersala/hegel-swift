@@ -73,7 +73,15 @@ homomorphism law, `total([]) == 0`, `total([x]) == x`.
 ReCode (Wang et al., ACL 2023) — prompt perturbations, Robust Pass, fixed
 perturbation set, no minimization. EvalPlus / HumanEval+ — the benchmark's
 own tests are weak. MultiPL-E — Swift tasks. Vikram et al. 2023 — can LLMs
-write property-based tests. Chen & Tse 2021 — MT vocabulary.
+write property-based tests. Chen & Tse 2021 — MT vocabulary. Qiu et al.
+2026 (Propilot, arXiv:2606.06747) — the strongest published control for
+this lane: GPT-5.5 asked to write property tests for TVM unaided, 24
+hours, 1,863 tests, over 90% not runnable and 5.42% with correct property
+logic; constrained to a catalog of 20 law skeletons with applicability
+and rejection rules, validated before execution, 4,579 tests, failures
+50% semantic. Their skeleton is a catalog law with a "not for" line, and
+their finding that the unaided baseline reaches the highest code coverage
+by exercising error paths is the reason this lane scores by refutations.
 
 ## Guardrails that belong in an agent's instructions, not the library
 
@@ -82,7 +90,8 @@ write property-based tests. Chen & Tse 2021 — MT vocabulary.
 - A passing premise law without a correlated generator is a claim about
   the generator, not the code.
 - Before writing a unit test, ask which law this is; if it has a name, use
-  the name.
+  the name. Read the law's `Not for:` line before applying it: a failure
+  on an operation the law was never for is not a finding.
 - A minimal counterexample on a design question (e.g. which edit wins on
   merge) is a question for the human, not a fix.
 

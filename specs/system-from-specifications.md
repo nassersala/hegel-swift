@@ -295,6 +295,11 @@ have to, and the method's cost returns.
    A, so its budget is honest.
 4. Phase C in this terminal.
 5. Score the table; write the report into this file under "Result".
+   The score is refutations found and decisions named, never coverage:
+   an unconstrained agent reaches the highest line coverage by writing
+   tests that exercise the frontend's error paths, and that coverage is
+   worth nothing (Qiu et al. 2026, Propilot, whose unaided baseline led
+   every coverage curve and had 5% of tests with correct property logic).
 
 What to bring back from each agent: what it drew before writing any
 file, and its verdict list. Those two are the data; the code is the

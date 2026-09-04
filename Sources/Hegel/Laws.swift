@@ -35,6 +35,12 @@
 ///   domain is small enough to collide.
 /// - **Laws that fail for a reason are output, not noise.** `Double` is not
 ///   a monoid under `+`; the suite's job is the minimal counterexample.
+/// - **Each law says what it is not for.** A `Not for:` line names the
+///   operations the law does not describe (subtraction is not
+///   commutative, `abs` is not an involution). A person rarely needs it;
+///   an agent choosing laws from the catalog does, so that a failure on
+///   an operation the law was never for is not reported as a bug. This
+///   is Propilot's rejection rule (Qiu et al. 2026), kept as prose.
 ///
 /// The catalog is the whole v1. Anything not here is a plain `forAll`.
 
@@ -233,6 +239,8 @@ extension Laws {
     }
 
     /// `op` is associative. `label` is how the failure prints the operation.
+    /// Not for: subtraction, division, exponentiation, floating-point `+`
+    /// under exact equality (associative only up to rounding).
     public static func semigroup<T>(
         _ gen: Gen<T>, _ label: String, _ op: @escaping @Sendable (T, T) -> T,
         equal: @escaping @Sendable (T, T) -> Bool
@@ -243,6 +251,8 @@ extension Laws {
     }
 
     /// Associativity, left identity, right identity.
+    /// Not for: an operation with a one-sided identity only (`append` to
+    /// a fixed prefix), or whose identity is not a value of the carrier.
     public static func monoid<T>(
         _ gen: Gen<T>, _ label: String, _ op: @escaping @Sendable (T, T) -> T,
         identity: T, equal: @escaping @Sendable (T, T) -> Bool
@@ -259,6 +269,8 @@ extension Laws {
     }
 
     /// Monoid laws plus two-sided inverses.
+    /// Not for: `max`, union, string append, anything without an inverse
+    /// for every element; those are monoids or semilattices.
     public static func group<T>(
         _ gen: Gen<T>, _ label: String, _ op: @escaping @Sendable (T, T) -> T,
         identity: T, inverse: @escaping @Sendable (T) -> T,
@@ -276,6 +288,8 @@ extension Laws {
     }
 
     /// `a op b == b op a`.
+    /// Not for: order-sensitive operations: subtraction, division, string
+    /// or array append, matrix product, function composition.
     public static func commutative<T>(
         _ gen: Gen<T>, _ label: String, _ op: @escaping @Sendable (T, T) -> T,
         equal: @escaping @Sendable (T, T) -> Bool
@@ -288,6 +302,7 @@ extension Laws {
     }
 
     /// `a op a == a` (`max`, union, intersection).
+    /// Not for: `+`, `*`, append, or any operation that accumulates.
     public static func idempotent<T>(
         _ gen: Gen<T>, _ label: String, _ op: @escaping @Sendable (T, T) -> T,
         equal: @escaping @Sendable (T, T) -> Bool
@@ -300,6 +315,8 @@ extension Laws {
     }
 
     /// `f(f(a)) == f(a)` (`normalized`, `trimmed`, `sorted`).
+    /// Not for: `reversed`, negate, increment, a hash, or any function
+    /// meant to change its input every time.
     public static func idempotent<T>(
         _ gen: Gen<T>, _ label: String, _ f: @escaping @Sendable (T) -> T,
         equal: @escaping @Sendable (T, T) -> Bool
@@ -316,6 +333,8 @@ extension Laws {
     /// a state-based CRDT: `merge` converges from any order, any grouping,
     /// any redelivery, starting from `identity`. Also `max` with `Int.min`,
     /// `Set.union` with `[]`, `||` with `false`.
+    /// Not for: a merge that is order-sensitive (last-writer-wins by
+    /// arrival), or one whose identity is not in the carrier.
     public static func semilattice<T>(
         _ gen: Gen<T>, _ label: String, _ op: @escaping @Sendable (T, T) -> T,
         identity: T, equal: @escaping @Sendable (T, T) -> Bool
@@ -327,6 +346,8 @@ extension Laws {
     }
 
     /// `f(f(a)) == a` (`reversed`, negate, conjugate, complement).
+    /// Not for: `abs`, `sorted`, `trimmed`, or any projection; those are
+    /// idempotent, which is the opposite claim.
     public static func involution<T>(
         _ gen: Gen<T>, _ label: String, _ f: @escaping @Sendable (T) -> T,
         equal: @escaping @Sendable (T, T) -> Bool
@@ -339,6 +360,9 @@ extension Laws {
     }
 
     /// `mul` distributes over `add`, on both sides.
+    /// Not for: floating point under exact equality, saturating or
+    /// wrapping arithmetic at the bounds, or `min`/`max` over a carrier
+    /// where only one side distributes.
     public static func distributive<T>(
         _ gen: Gen<T>, _ mulLabel: String, _ mul: @escaping @Sendable (T, T) -> T,
         over addLabel: String, _ add: @escaping @Sendable (T, T) -> T,
@@ -715,6 +739,9 @@ extension Laws {
     /// element `Int`, and the laws are `map(id) == id` and
     /// `map(g ∘ f) == map(g) ∘ map(f)` for drawn `f`, `g` (`Endo`). Enough to
     /// find a `map` that evaluates twice, drops or reorders.
+    /// Not for: a container whose `map` is allowed to reorder or dedupe
+    /// (`Set.map` in Swift returns an array and is fine; a `map` that
+    /// re-sorts by key is not a functor over its elements).
     public static func functor<F>(
         _ gen: Gen<F>,
         map: @escaping @Sendable (F, @escaping @Sendable (Int) -> Int) -> F,
