@@ -485,6 +485,38 @@ extension Laws {
             },
         ])
     }
+
+    /// `equal` is an equivalence relation: reflexive, symmetric, transitive.
+    /// Every suite that takes `equal:` assumes this and none of them checks
+    /// it; `equatable` checks it for `==` only. The premise is drawn as
+    /// there: a small batch, or one class from `equivalents:`. Together
+    /// with `congruent` this is what a chosen equality owes before the
+    /// structure suites mean anything under it.
+    /// Not for: approximate equality — it is not transitive, and that is
+    /// the failure this finds.
+    public static func equivalence<T>(
+        _ gen: Gen<T>, _ label: String = "≈", equivalents: Gen<[T]>? = nil,
+        equal: @escaping @Sendable (T, T) -> Bool
+    ) -> LawSuite {
+        let xs = batch(gen, or: equivalents)
+        return LawSuite("equivalence relation \(label) over \(T.self)", [
+            Law("reflexive", gen) { a in
+                guard equal(a, a) else { throw LawViolated("a \(label) a is false") }
+            },
+            Law("symmetric", xs) { xs in
+                for (i, j) in orderedPairs(xs.count) where equal(xs[i], xs[j]) && !equal(xs[j], xs[i]) {
+                    throw LawViolated("\(xs[i]) \(label) \(xs[j]) but not the reverse")
+                }
+            },
+            Law("transitive", xs) { xs in
+                for (i, j, k) in orderedTriples(xs.count)
+                where equal(xs[i], xs[j]) && equal(xs[j], xs[k]) && !equal(xs[i], xs[k]) {
+                    throw LawViolated(
+                        "\(xs[i]) \(label) \(xs[j]) and \(xs[j]) \(label) \(xs[k]) but not \(xs[i]) \(label) \(xs[k])")
+                }
+            },
+        ])
+    }
 }
 
 extension Law {

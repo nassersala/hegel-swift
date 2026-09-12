@@ -106,6 +106,19 @@ private func counterexamples(
         #expect(found.allSatisfy { $0.contains("suite: congruence of + over Int under ≈") })
     }
 
+    /// Equality of counts is an equivalence relation; "within one of each
+    /// other" is reflexive and symmetric but not transitive.
+    @Test func sameCountIsAnEquivalenceAndWithinOneIsNot() throws {
+        let sameCount: @Sendable (String, String) -> Bool = { $0.count == $1.count }
+        try forAll(Laws.equivalence(Self.strings, equal: sameCount), database: "")
+        let withinOne: @Sendable (Int, Int) -> Bool = { abs($0 - $1) <= 1 }
+        let found = try counterexamples(Laws.equivalence(Self.small, "~", equal: withinOne))
+        #expect(found.count == 1)
+        let c = try #require(found.first)
+        #expect(c.contains("law: transitive"))
+        #expect(c.contains("suite: equivalence relation ~ over Int"))
+    }
+
     /// Laws inherited from the meaning: under equality of counts, string
     /// concatenation is a monoid and `+` is a congruence. No string
     /// reasoning is involved; `count` is a monoid homomorphism into

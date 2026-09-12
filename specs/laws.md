@@ -345,6 +345,12 @@ Each entry: constructor, laws, carrier requirements, notes.
   (`7 = max(7, 7)`) and misses `Int.min`. It is the equation the
   transported identity laws use.
 
+**`Laws.equivalence(gen, label, equivalents:, equal:)`** — `equal` is reflexive, symmetric, transitive
+- What every `equal:` suite assumes and none checks; `equatable` is the
+  `==` case. Finds approximate equality: "within one" is not transitive.
+  With `congruent`, this is what a chosen equality owes before the structure
+  suites mean anything under it (Agda: `Equivalence` plus `∙-cong`).
+
 **`Laws.congruent(gen, op, label, equivalents:, equal:)`** — `a ≈ a′ ⇒ a op c ≈ a′ op c` and `c op a ≈ c op a′`
 - Trivial under `==` (no `==` overload). Real as soon as `equal:` is
   coarser than the representation: parity is a congruence for `+`, sign is
@@ -382,6 +388,53 @@ story for them. Specify after `functor` is in.
 `flatMap` associativity likewise. The choice-sequence model makes functor
 laws checkable by equality, which is rare; this is documentation of the
 model as much as a test.
+
+### Categories and functors (`Sources/Hegel/CategoryLaws.swift`)
+
+**`Category<Ob, Arrow>`** — a witness in Essence04's layering: quiver
+(`objects: Gen<Ob>`, `arrows: (Ob) -> Gen<Arrow>`, `codomain`), signature
+(`identity`, `compose`), equivalence on parallel arrows (`equal`).
+- Objects are values a generator draws — dimensions, states, indices — and
+  every arrow knows its codomain, so composable chains are drawn without a
+  precondition: an arrow out of `a`, then one out of its codomain. No typed
+  arrows, no partial composition in the laws.
+- `Category.monoid(gen, label, op, identity:, equal:)` is the one-object
+  case; a monoid homomorphism is a functor between two of them. `Laws.monoid`
+  and `Laws.monoidHomomorphism` stay as they are — same laws, and a
+  counterexample that does not print a unit object.
+- `Examples/SchemaMigrations` is the worked one, against real SQLite:
+  objects are schemas (not version numbers — a migration is only composable
+  with what *this* migration produced), arrows are migrations, composition
+  squashes, equality is "SQLite reports the same schema". `run` is a functor
+  into effects. A planted `drop x … add x` rule fails the functor law on a
+  two-step script; and the example's own rename-chain rule was unsound in
+  its first draft, which the category suite found before any test was
+  written for it (`rename b→c; drop a; rename c→a`).
+- In the wild: schema migrations (a squash against its chain), currency
+  conversion with rounding (USD→EUR→GBP against USD→GBP), tensor pipelines
+  (shapes; the quantized backend as a functor), patches and CRDT logs
+  (apply-composed against apply-in-sequence), scene-graph frames, format
+  converters, navigation. The header comment of `CategoryLaws.swift` lists
+  them with the law each one fails.
+- Not of this kind: Swift's category of functions (objects are types). It is
+  testable one hom-set at a time with `Laws.functor(_:map:equal:)`; that is
+  what parametricity leaves to test.
+
+**`Laws.category(c, equivalents:)`** — `id ∘ f ≈ f`, `f ∘ id ≈ f`, `(h ∘ g) ∘ f ≈ h ∘ (g ∘ f)`, `∘` respects `≈` in each argument
+- Integer matrices over dimensions 1…3 are the many-object test carrier
+  (`CategoryLawsTests`); subtraction as a one-object category fails exactly
+  `id - f = f` and associativity.
+
+**`Laws.functor(label, objects:, arrows:, from:, to:)`** — `F(id a) ≈ id (F a)`, `F(g ∘ f) ≈ F g ∘ F f`, under the target's `equal`
+- `count` is a functor between the one-object categories of lists and
+  integers; entrywise `mod 7` is a functor from ℤ-matrices to ℤ/7-matrices;
+  entrywise `abs` is not (`[1 -1]·[1 1]ᵀ = 0`, `[1 1]·[1 1]ᵀ = 2`).
+- An `Enumeration<State, Stimulus, Response>` is a quiver; model conformance
+  is a functor from the free category on it to the meaning. The model-based
+  runner already checks that with the sequence shrinker; this entry is the
+  same square stated as laws, for categories whose arrows are values.
+- Not for: contravariant maps, maps that scale, thin categories (orders): a
+  monotone map's law is that an arrow exists, not an equation.
 
 ### Optics
 
