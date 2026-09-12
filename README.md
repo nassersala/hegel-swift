@@ -198,7 +198,7 @@ Two patterns ship as constructors, named after Zhou, Sun, Chen and Towey's MR pa
 
 ## Laws: named suites
 
-The oldest property-based tests are laws — QuickCheck's first examples were monoid and functor laws. A law is a metamorphic relation with more than one input (associativity relates three), and here it is a value in the same style as `Relation`: a name, a generator, a check that throws. `Laws` is the catalog — semigroup, monoid, group, semilattice, lattice, distributivity, homomorphism; the `Equatable`, `Hashable`, `Comparable` and `Collection` conformance laws; retraction, isomorphism, involution; functor; lens. Operations are passed as closures, there is no protocol to conform to, and every comparison goes through an equality witness (`equal:`, `==` where the carrier is `Equatable`):
+The oldest property-based tests are laws — QuickCheck's first examples were monoid and functor laws. A law is a metamorphic relation with more than one input (associativity relates three), and here it is a value in the same style as `Relation`: a name, a generator, a check that throws. `Laws` is the catalog — semigroup, monoid, group, semilattice, lattice, distributivity, homomorphism and monoid homomorphism, congruence of an operation with a chosen equality; the `Equatable`, `Hashable`, `Comparable` and `Collection` conformance laws; retraction, isomorphism, involution; functor; lens. Operations are passed as closures, there is no protocol to conform to, and every comparison goes through an equality witness (`equal:`, `==` where the carrier is `Equatable`):
 
 ```swift
 try forAll(Laws.monoid(strings, "+", +, identity: ""))

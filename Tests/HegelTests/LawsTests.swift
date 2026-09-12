@@ -72,6 +72,53 @@ private func counterexamples(
             database: "")
     }
 
+    @Test func countIsAMonoidHomomorphismFromConcatenationToAddition() throws {
+        try forAll(
+            Laws.monoidHomomorphism(
+                Self.lists, "count", { $0.count },
+                from: "+", +, identity: [], to: "+", +, identity: 0),
+            database: "")
+    }
+
+    /// A constant map preserves `max` (`7 = max(7, 7)`) and misses its
+    /// identity: the operation law alone would pass.
+    @Test func constantMapPreservesMaxButNotItsIdentity() throws {
+        let found = try counterexamples(
+            Laws.monoidHomomorphism(
+                Self.lists, "seven", { _ in 7 },
+                from: "+", +, identity: [], to: "max", { max($0, $1) }, identity: Int.min))
+        #expect(found.count == 1)
+        let c = try #require(found.first)
+        #expect(c.contains("law: identity"))
+        #expect(c.contains("violated: seven([]) = 7, \(Int.min) = \(Int.min)"))
+    }
+
+    /// Parity is a congruence for `+`; sign is not: `1 ≈ 2`, but
+    /// `1 + -1 = 0` and `2 + -1 = 1` differ in sign.
+    @Test func parityIsACongruenceForAdditionAndSignIsNot() throws {
+        let parity: @Sendable (Int, Int) -> Bool = { $0 & 1 == $1 & 1 }
+        try forAll(Laws.congruent(Self.ints, "+", +, equal: parity), database: "")
+        let sign: @Sendable (Int, Int) -> Bool = { $0.signum() == $1.signum() }
+        let classes: Gen<[Int]> = array(of: Gen<Int>.int(in: 1...20), count: 2...3)
+        let found = try counterexamples(
+            Laws.congruent(Self.ints, "+", +, equivalents: classes, equal: sign))
+        #expect(found.count == 2)
+        #expect(found.allSatisfy { $0.contains("suite: congruence of + over Int under ≈") })
+    }
+
+    /// Laws inherited from the meaning: under equality of counts, string
+    /// concatenation is a monoid and `+` is a congruence. No string
+    /// reasoning is involved; `count` is a monoid homomorphism into
+    /// `(Int, +, 0)`, so these laws are consequences, and this run only
+    /// confirms what `countIsAMonoidHomomorphism…` already implies.
+    @Test func stringsUnderEqualCountsAreAMonoidBecauseCountIsAHomomorphism() throws {
+        let sameCount: @Sendable (String, String) -> Bool = { $0.count == $1.count }
+        try forAll(
+            Laws.monoid(Self.strings, "+", +, identity: "", equal: sameCount)
+                + Laws.congruent(Self.strings, "+", +, equal: sameCount),
+            database: "")
+    }
+
     @Test func losslessStringConversionIsARetraction() throws {
         try forAll(
             Laws.retraction(Self.ints, to: "String", { String($0) }, from: "Int", { Int($0)! }),

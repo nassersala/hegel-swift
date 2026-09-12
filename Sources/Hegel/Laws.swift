@@ -429,6 +429,62 @@ extension Laws {
             }
         ])
     }
+
+    /// A monoid homomorphism: `f(a opA b) == f(a) opB f(b)` and
+    /// `f(identityA) == identityB`; equality on the codomain. The second
+    /// equation is not implied by the first — a constant map preserves any
+    /// idempotent operation (`max`) and misses its identity — and it is the
+    /// one the transported identity laws need (see `specs/laws.md`, "Laws
+    /// are inherited from the meaning").
+    /// Not for: a map into a semigroup with no identity; use `homomorphism`.
+    public static func monoidHomomorphism<A, B>(
+        _ gen: Gen<A>, _ fLabel: String, _ f: @escaping @Sendable (A) -> B,
+        from opALabel: String, _ opA: @escaping @Sendable (A, A) -> A, identity identityA: A,
+        to opBLabel: String, _ opB: @escaping @Sendable (B, B) -> B, identity identityB: B,
+        equal: @escaping @Sendable (B, B) -> Bool
+    ) -> LawSuite where A: Sendable, B: Sendable {
+        let operation = homomorphism(gen, fLabel, f, from: opALabel, opA, to: opBLabel, opB, equal: equal)
+        return LawSuite(
+            "monoid homomorphism \(fLabel): (\(A.self), \(opALabel), \(identityA)) → (\(B.self), \(opBLabel), \(identityB))",
+            operation.laws + [
+                Law("identity", Gen<Void>.constant(())) { _ in
+                    try requireEqual("\(fLabel)(\(identityA))", f(identityA), "\(identityB)", identityB, equal)
+                }
+            ])
+    }
+
+    /// `op` respects `equal`: `a ≈ a′ ⇒ a op c ≈ a′ op c` and
+    /// `c op a ≈ c op a′`. Trivial when `equal` is `==` and `op` is a
+    /// function, so there is no `==` overload; it is a real law as soon as
+    /// `equal:` is coarser than the representation, and the other suites do
+    /// not check it. The premise is drawn as for `equatable`: a small batch,
+    /// or one class from `equivalents:` when given. When `equal` is
+    /// equality of meanings under a homomorphism, this law is a consequence
+    /// of `monoidHomomorphism` and need not be run.
+    /// Not for: `equal:` that is not an equivalence (approximate equality).
+    public static func congruent<T>(
+        _ gen: Gen<T>, _ label: String, _ op: @escaping @Sendable (T, T) -> T,
+        equivalents: Gen<[T]>? = nil,
+        equal: @escaping @Sendable (T, T) -> Bool
+    ) -> LawSuite {
+        let classAndValue = zip(batch(gen, or: equivalents), gen).map { (xs: $0.0, c: $0.1) }
+        return LawSuite("congruence of \(label) over \(T.self) under ≈", [
+            Law("a ≈ a′ ⇒ a \(label) c ≈ a′ \(label) c", classAndValue) { v in
+                for (i, j) in orderedPairs(v.xs.count) where equal(v.xs[i], v.xs[j]) {
+                    try requireEqual(
+                        "\(v.xs[i]) \(label) c", op(v.xs[i], v.c),
+                        "\(v.xs[j]) \(label) c", op(v.xs[j], v.c), equal)
+                }
+            },
+            Law("a ≈ a′ ⇒ c \(label) a ≈ c \(label) a′", classAndValue) { v in
+                for (i, j) in orderedPairs(v.xs.count) where equal(v.xs[i], v.xs[j]) {
+                    try requireEqual(
+                        "c \(label) \(v.xs[i])", op(v.c, v.xs[i]),
+                        "c \(label) \(v.xs[j])", op(v.c, v.xs[j]), equal)
+                }
+            },
+        ])
+    }
 }
 
 extension Law {
@@ -871,6 +927,16 @@ extension Laws {
         to opBLabel: String, _ opB: @escaping @Sendable (B, B) -> B
     ) -> LawSuite {
         homomorphism(gen, fLabel, f, from: opALabel, opA, to: opBLabel, opB, equal: ==)
+    }
+
+    public static func monoidHomomorphism<A: Sendable, B: Equatable & Sendable & SendableMetatype>(
+        _ gen: Gen<A>, _ fLabel: String, _ f: @escaping @Sendable (A) -> B,
+        from opALabel: String, _ opA: @escaping @Sendable (A, A) -> A, identity identityA: A,
+        to opBLabel: String, _ opB: @escaping @Sendable (B, B) -> B, identity identityB: B
+    ) -> LawSuite {
+        monoidHomomorphism(
+            gen, fLabel, f, from: opALabel, opA, identity: identityA,
+            to: opBLabel, opB, identity: identityB, equal: ==)
     }
 
     public static func retraction<A: Equatable & SendableMetatype, B>(

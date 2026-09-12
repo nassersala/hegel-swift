@@ -115,6 +115,16 @@ For Hegel, this suggests deriving generators, executors, diagrams, and formal
 exports as interpretations of one small domain vocabulary rather than adding
 unrelated helper APIs.
 
+The transfer of laws is a theorem, not a slogan. If `⟦·⟧` preserves the
+operations and the meaning is lawful, the representation is lawful under
+equality of meanings, and its operations respect that equality; the proof
+transports each law across `⟦·⟧` and back and never inspects the
+representation (`denotational-design/sketches/Essence02.lagda.md`,
+`laws-by-meaning`). So Hegel's obligation is preservation: `consistent` in
+the model-based runner, `Laws.monoidHomomorphism` in the catalog. The
+representation's own laws under meaning-equality are evidence of kind 1 or 2
+below and need no suite; under representation equality they overclaim.
+
 ## Model-based testing as a commuting square
 
 For a generated command program `p`, model-based correctness has this shape:
@@ -259,6 +269,10 @@ separated from its implementation.
    artifact "verified"?
 5. Can `Enumeration`, `Operation`, and `UsageModel` be honest interpretations
    of one transition-system value without over-generalizing the API?
+6. Should the equality witness be one reusable `Equivalence<T>` value, with
+   an `Equatable` default and a pullback along a meaning function, shared by
+   `Laws`, the model-based runner and `Enumeration`? See `laws.md`, "Open
+   questions".
 
 ## Non-goals
 

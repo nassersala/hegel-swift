@@ -61,6 +61,21 @@ propositions; it is not the source of their meaning. See
   This is why there is no `Laws.abstraction` over a `Gen<T>`; see
   `specs/model-based.md`, "Result".
 
+- Laws are inherited from the meaning. If `⟦·⟧` is a monoid homomorphism
+  into a lawful meaning, the representation is a monoid under equality of
+  meanings (`equal: { ⟦a⟧ == ⟦b⟧ }`), and the operation respects that
+  equality, by argument alone: transport each side across `⟦·⟧`, apply the
+  meaning's law, transport back. Machine-checked once, for any operations,
+  target equality and preserving map, as `laws-by-meaning` in
+  `denotational-design/sketches/Essence02.lagda.md`. Consequences for what
+  to run: test `Laws.monoidHomomorphism` (both equations; the identity one
+  is needed for the identity laws) and let the representation's laws under
+  meaning-equality be evidence of kind 1–2, not a suite. Testing the
+  representation's laws under `==` instead claims more than the meaning
+  requires, and is often false (two representations of one meaning).
+  Testing them under any *other* coarser `equal:` needs `Laws.congruent`
+  as well, which the structure suites do not include.
+
 The subject-first autocomplete facade discussed in
 `specs/syntax-and-discovery.md` may lower to this implemented representation.
 It must not create a second catalog or execution semantics.
@@ -325,6 +340,20 @@ Each entry: constructor, laws, carrier requirements, notes.
   (For a 256-bit tag, "every pair differs" is also true to 2⁻²⁵⁶; the
   README says existence and lets the reader notice.)
 
+**`Laws.monoidHomomorphism(gen, f, from: opA, identity:, to: opB, identity:, labels)`** — the above plus `f(identityA) ≈ identityB`
+- The identity equation is not implied: a constant map preserves `max`
+  (`7 = max(7, 7)`) and misses `Int.min`. It is the equation the
+  transported identity laws use.
+
+**`Laws.congruent(gen, op, label, equivalents:, equal:)`** — `a ≈ a′ ⇒ a op c ≈ a′ op c` and `c op a ≈ c op a′`
+- Trivial under `==` (no `==` overload). Real as soon as `equal:` is
+  coarser than the representation: parity is a congruence for `+`, sign is
+  not (`1 ≈ 2`, `1 + -1 = 0`, `2 + -1 = 1`). Premise drawn as in
+  `equatable`: a batch, or one class from `equivalents:`.
+- Under equality of meanings along a homomorphism it is a consequence of
+  `monoidHomomorphism`; under any other coarser equality it is the law the
+  `monoid`/`group`/`lattice` suites silently assume.
+
 ### Functor laws (endomorphisms only)
 
 Swift has no higher-kinded types. A single `map` closure cannot express
@@ -440,6 +469,17 @@ model as much as a test.
   on realistic carriers is unmeasured.
 - `LawSuite +` names the sum `"A + B"`; `named(_:)` renames. Whether
   constructors should take an optional name instead is a matter of taste.
+- A reusable `Equivalence<T>` witness (2026-09-12, not done). `equal:` is a
+  bare closure repeated on every constructor here and, eight more times, in
+  `ModelBased`, `Enumeration` and `Metamorphic`. The Agda sketch that
+  motivated `congruent` (`Essence02`, `Equivalence`/`pullback`) makes the
+  equality one value with two constructors: `==` for `Equatable`, and the
+  pullback of a meaning, `by(⟦·⟧)`. That would let a suite know which case
+  it is in: under a pullback, `congruent` is implied and can be skipped;
+  under any other witness it is owed. It would also give the review
+  worksheet's "equality or observational equivalence" line a value to name.
+  Deferred because it changes the model-based and enumeration parameter
+  lists too; a proper design should do all three at once.
 
 ## As built
 
