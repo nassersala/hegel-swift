@@ -34,8 +34,14 @@ public struct Failure: Sendable {
     /// answer. When that re-run cannot be done (no blob, the blob no
     /// longer replays, or the property passes this time) this falls back
     /// to the last error the run saw under this origin, which may belong
-    /// to a larger case. nil when there is neither.
+    /// to a larger case; `errorIsFromShrunkCase` says which. nil when
+    /// there is neither.
     public let error: (any Error)?
+    /// Whether `error` was thrown by the re-run at the shrunk
+    /// counterexample. False when it is the run-order fallback, which the
+    /// report marks "(from a larger case)": the property did not fail the
+    /// same way twice, so it is not a function of its input.
+    public let errorIsFromShrunkCase: Bool
 }
 
 /// Thrown by `forAll` when the property fails (with counterexamples) or the
@@ -48,7 +54,7 @@ public struct PropertyFailure: Error, CustomStringConvertible {
         if let runError { return "hegel run errored: \(runError)" }
         let lines = failures.map { f in
             "  counterexample: \(f.counterexample ?? "<unavailable>")"
-                + (f.error.map { "\n  \($0)" } ?? "")
+                + (f.error.map { "\n  \($0)" + (f.errorIsFromShrunkCase ? "" : " (from a larger case)") } ?? "")
                 + (f.reproduceBlob.map { "\n  reproduce blob: \($0)" } ?? "")
         }
         return "property failed with \(failures.count) distinct bug(s)\n"
@@ -248,7 +254,8 @@ final class Run<A> {
                     replayed.complete(.overrun)
                 }
             }
-            return Failure(origin: f.origin, reproduceBlob: f.blob, counterexample: counterexample, error: error ?? lastErrors[f.origin])
+            return Failure(origin: f.origin, reproduceBlob: f.blob, counterexample: counterexample,
+                           error: error ?? lastErrors[f.origin], errorIsFromShrunkCase: error != nil)
         }, runError: nil)
     }
 
@@ -268,7 +275,8 @@ final class Run<A> {
                     replayed.complete(.overrun)
                 }
             }
-            failures.append(Failure(origin: f.origin, reproduceBlob: f.blob, counterexample: counterexample, error: error ?? lastErrors[f.origin]))
+            failures.append(Failure(origin: f.origin, reproduceBlob: f.blob, counterexample: counterexample,
+                                    error: error ?? lastErrors[f.origin], errorIsFromShrunkCase: error != nil))
         }
         throw PropertyFailure(failures: failures, runError: nil)
     }

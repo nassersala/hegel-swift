@@ -20,7 +20,32 @@ import Testing
                 #expect(f.failures.count == 1)
                 #expect(f.failures.first?.counterexample == "10")
                 #expect((f.failures.first?.error as? Fail)?.x == 10, "seed \(seed)")
+                #expect(f.failures.first?.errorIsFromShrunkCase == true)
+                #expect(!f.description.contains("from a larger case"))
             }
+        }
+    }
+
+    /// A property that does not fail the same way twice cannot have its
+    /// error read off the blob; the report says so instead of pretending.
+    @Test func fallbackIsMarked() throws {
+        nonisolated(unsafe) var runContext: Context?
+        do {
+            try forAll(Gen<Int>.int(in: 0...100_000), testCases: 100, seed: 1, database: "") { x, tc in
+                if runContext == nil { runContext = tc.ctx }
+                // Every case of the run shares its context; the re-run is a
+                // replayed case with a fresh one. Failing only under the
+                // run's context keeps the engine's view consistent while
+                // the re-run passes.
+                if x >= 10 && tc.ctx === runContext { throw Fail(x: x) }
+            }
+            Issue.record("did not fail")
+        } catch let f as PropertyFailure {
+            let bug = try #require(f.failures.first)
+            #expect(bug.counterexample == "10")
+            #expect(bug.error is Fail)
+            #expect(bug.errorIsFromShrunkCase == false)
+            #expect(f.description.contains("(from a larger case)"))
         }
     }
 

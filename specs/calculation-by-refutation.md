@@ -164,7 +164,12 @@ the stored error, so the report named 12 or 14 above a counterexample of
 case, reads the value through the generator, runs the property on the
 same case (so draws inside the property replay too) and reports what it
 throws; the last-seen error is only the fallback when the blob no longer
-replays. `ReportedErrorTests` pins this for the sync and async loops.
+replays or the property passes on the re-run, and then
+`Failure.errorIsFromShrunkCase` is false and the report says "(from a
+larger case)" after the error, because a property that does not fail the
+same way twice has no error that is a function of its input.
+`ReportedErrorTests` pins this for the sync and async loops and for the
+fallback.
 
 ## Evidence
 
