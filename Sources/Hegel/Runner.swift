@@ -28,10 +28,13 @@ public struct Failure: Sendable {
     /// The minimal counterexample itself, recovered by replaying the blob
     /// through the generator. `String(describing:)` of the value.
     public let counterexample: String?
-    /// What the property threw at this bug's minimal counterexample: the
-    /// last error the run saw under this origin, which is the shrinker's
-    /// final accepted case. `Stuck` here means the property reached a
-    /// hole rather than a wrong answer. nil when the run recorded none.
+    /// What the property threw at this bug's minimal counterexample,
+    /// obtained by running the property once more on the replayed blob.
+    /// `Stuck` here means the property reached a hole rather than a wrong
+    /// answer. When that re-run cannot be done (no blob, the blob no
+    /// longer replays, or the property passes this time) this falls back
+    /// to the last error the run saw under this origin, which may belong
+    /// to a larger case. nil when there is neither.
     public let error: (any Error)?
 }
 
@@ -91,12 +94,12 @@ final class Run<A> {
     private let outputBox: OutputBox?
     private let rawSettings: OpaquePointer?
     private var run: OpaquePointer?
-    /// The last error thrown under each bug origin. Interesting cases
-    /// under one origin arrive in shrink order, so the last one is the
-    /// minimal case the report shows (a cross-origin hit while shrinking
-    /// another bug under `reportMultipleFailures` can leave a larger
-    /// case's error here; the deterministic fix is to re-run the property
-    /// at the replayed value, as `expectAll` and `stuckGoal` do).
+    /// The last error thrown under each bug origin. Only a fallback: the
+    /// engine keeps executing shrink candidates that fail but are not
+    /// smaller after it has found the minimum (1 to 4 of them on
+    /// `x >= 10` over 0...100_000, 17 of 20 seeds), so the last error
+    /// here is usually a larger case's. The error the report shows comes
+    /// from re-running the property on the replayed blob instead.
     private var lastErrors: [String: any Error] = [:]
 
     init(
@@ -187,9 +190,9 @@ final class Run<A> {
         }
     }
 
-    /// Reads the run's result: returns on a pass, throws `PropertyFailure`
-    /// otherwise.
-    func result() throws {
+    /// The run's failures: nil on a pass, `PropertyFailure` thrown on a
+    /// run error (health check, flaky test — no verdict on the property).
+    private func rawFailures() throws -> [(origin: String, blob: String?)]? {
         var rawResult: OpaquePointer?
         try check(hegel_run_result(ctx.raw, run, &rawResult), ctx.lastError)
         defer { _ = hegel_run_result_free(ctx.raw, rawResult) }
@@ -199,7 +202,7 @@ final class Run<A> {
 
         switch RunStatus(rawValue: rawStatus.rawValue) {
         case .passed, nil:
-            return
+            return nil
         case .error:
             var message: UnsafePointer<CChar>?
             _ = hegel_run_result_error(ctx.raw, rawResult, &message)
@@ -209,7 +212,7 @@ final class Run<A> {
         case .failed:
             var count = 0
             try check(hegel_run_result_failure_count(ctx.raw, rawResult, &count), ctx.lastError)
-            var failures: [Failure] = []
+            var failures: [(origin: String, blob: String?)] = []
             for index in 0..<count {
                 var rawFailure: OpaquePointer?
                 try check(hegel_run_result_failure(ctx.raw, rawResult, index, &rawFailure), ctx.lastError)
@@ -218,21 +221,65 @@ final class Run<A> {
                 var blobPtr: UnsafePointer<CChar>?
                 _ = hegel_failure_origin(ctx.raw, rawFailure, &originPtr)
                 _ = hegel_failure_reproduction_blob(ctx.raw, rawFailure, &blobPtr)
-                let blob = blobPtr.map { String(cString: $0) }
-                // Recover the shrunk value for display by replaying the
-                // blob through the same generator. Best-effort: a replay
-                // failure leaves the blob as the fallback.
-                let counterexample = blob.flatMap { b in
-                    (try? replay(gen, blob: b, settings: settings)).map { String(describing: $0) }
-                }
-                let bugOrigin = originPtr.map { String(cString: $0) } ?? origin
-                failures.append(Failure(
-                    origin: bugOrigin,
-                    reproduceBlob: blob,
-                    counterexample: counterexample,
-                    error: lastErrors[bugOrigin]))
+                failures.append((originPtr.map { String(cString: $0) } ?? origin, blobPtr.map { String(cString: $0) }))
             }
-            throw PropertyFailure(failures: failures, runError: nil)
+            return failures
+        }
+    }
+
+    /// Reads the run's result: returns on a pass, throws `PropertyFailure`
+    /// otherwise. Each failure's counterexample and error come from one
+    /// replay of its blob: the generator recovers the value, then `rerun`
+    /// (the property) runs on the same case, so an error that names the
+    /// value names the shrunk one. Best-effort: a blob that no longer
+    /// replays leaves both unavailable and the error falls back to
+    /// `lastErrors`.
+    func result(_ rerun: (A, TestCase) throws -> Void) throws {
+        guard let raw = try rawFailures() else { return }
+        throw PropertyFailure(failures: raw.map { f in
+            var counterexample: String?
+            var error: (any Error)?
+            if let blob = f.blob, let replayed = try? ReplayedCase(blob: blob, settings: settings) {
+                if let value = try? gen.run(replayed.tc) {
+                    counterexample = String(describing: value)
+                    do { try rerun(value, replayed.tc) } catch let thrown { error = Self.verdictError(thrown) }
+                    replayed.complete(.valid)
+                } else {
+                    replayed.complete(.overrun)
+                }
+            }
+            return Failure(origin: f.origin, reproduceBlob: f.blob, counterexample: counterexample, error: error ?? lastErrors[f.origin])
+        }, runError: nil)
+    }
+
+    /// `result` for an async property. Same replay; the re-run is awaited.
+    func result(_ rerun: (A, TestCase) async throws -> Void) async throws {
+        guard let raw = try rawFailures() else { return }
+        var failures: [Failure] = []
+        for f in raw {
+            var counterexample: String?
+            var error: (any Error)?
+            if let blob = f.blob, let replayed = try? ReplayedCase(blob: blob, settings: settings) {
+                if let value = try? gen.run(replayed.tc) {
+                    counterexample = String(describing: value)
+                    do { try await rerun(value, replayed.tc) } catch let thrown { error = Self.verdictError(thrown) }
+                    replayed.complete(.valid)
+                } else {
+                    replayed.complete(.overrun)
+                }
+            }
+            failures.append(Failure(origin: f.origin, reproduceBlob: f.blob, counterexample: counterexample, error: error ?? lastErrors[f.origin]))
+        }
+        throw PropertyFailure(failures: failures, runError: nil)
+    }
+
+    /// An error the re-run threw, if it is a verdict on the property. The
+    /// engine's control flow (`stopTest`, `assume`) and a timeout are not;
+    /// they leave the fallback in place.
+    private static func verdictError(_ error: any Error) -> (any Error)? {
+        switch error {
+        case is HegelError, is PropertyTimeout, is CancellationError: nil
+        default: error
         }
     }
 }
@@ -312,7 +359,7 @@ public func forAll<A>(
             try run.complete(tc, status, bugOrigin: bugOrigin)
         }
     }
-    try run.result()
+    try run.result(property)
 }
 
 // MARK: - Async forAll
@@ -393,7 +440,13 @@ public func forAll<A>(
             try run.complete(tc, status, bugOrigin: bugOrigin)
         }
     }
-    try run.result()
+    try await run.result { value, tc in
+        if let timeout {
+            try await withTimeout(timeout, origin: run.origin) { try await property(value, tc) }
+        } else {
+            try await property(value, tc)
+        }
+    }
 }
 
 /// Smuggles non-`Sendable` state (the property closure, the value, the

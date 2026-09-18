@@ -153,12 +153,18 @@ property failed with 1 distinct bug(s)
 ```
 
 `Failure.error` in `Runner.swift` carries what the property threw at the
-minimal counterexample, and the report prints it on the line after. The
-line comes from the last error the run saw under the bug's origin, correct
-on the single-bug default; under `reportMultipleFailures` a cross-origin
-hit can name a larger case's error. The deterministic version re-runs the
-property at the replayed value, as `expectAll` and `stuckGoal` do, and
-needs the async loop to replay too. Described, not made.
+minimal counterexample, and the report prints it on the line after. It
+used to be the last error the run saw under the bug's origin, on the
+belief that interesting cases arrive in shrink order so the last one is
+the minimum. They do not: after the shrinker has found the minimum it
+keeps executing candidates that fail but are not smaller (1 to 4 of them
+on `x >= 10` over 0...100_000, 17 of 20 seeds), and each one overwrote
+the stored error, so the report named 12 or 14 above a counterexample of
+10. Since 2026-09-18 the runner replays the final blob into a fresh test
+case, reads the value through the generator, runs the property on the
+same case (so draws inside the property replay too) and reports what it
+throws; the last-seen error is only the fallback when the blob no longer
+replays. `ReportedErrorTests` pins this for the sync and async loops.
 
 ## Evidence
 
