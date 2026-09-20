@@ -197,13 +197,17 @@ import Schedules
         #expect(scheduler.trace.contains { $0.hasPrefix("cancel #") })
     }
 
-    /// Cancelled before sleeping: throws without registering a timer.
+    /// Cancelled before sleeping: throws without registering a timer. The
+    /// sleeper is spawned on the scheduler's executor: a plain `Task {}`
+    /// escapes to the global pool, and on a loaded runner it did not come
+    /// back inside the 50 ms grace, the run was called stuck, and `thrown`
+    /// was never set (every CI run from 3 to 20 September).
     @Test func sleepingWhileCancelledThrowsAtOnce() {
         let scheduler = Scheduler()
         let clock = scheduler.clock
         let thrown = SendableBox<Bool>(false)
         _ = scheduler.run(policy: Scheduler.fifo) {
-            let t = Task { try await clock.sleep(for: .seconds(1)) }
+            let t = Task(executorPreference: scheduler.taskExecutor) { try await clock.sleep(for: .seconds(1)) }
             t.cancel()
             do { try await t.value } catch is CancellationError { thrown.value = true } catch {}
         }
