@@ -27,7 +27,9 @@ DIALECTIC_DIR="${DIALECTIC_DIR:-}"
 PROGRAMS="primitives bigints text strings lists stateful stateful-reject"
 # Divergences confirmed real, as column:program. They print instead of
 # failing the run. All three are hegel-go v0.9.5 against the Rust reference
-# on libhegel 0.43.1, and none is reported upstream yet.
+# on libhegel 0.43.1. The list label is known upstream (hegeldev/hegel-go#156,
+# "Labels are still wrong", with a fix open as #157): drop go:lists when that
+# lands and the column agrees. The stateful difference is not reported.
 #   go:lists            hegel-go hashes its span labels with a process-local
 #                       maphash of the generator's name, so a list of integers
 #                       and a list of booleans share a label; the reference
