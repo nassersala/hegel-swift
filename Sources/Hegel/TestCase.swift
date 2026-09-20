@@ -22,18 +22,53 @@ final class Context {
     }
 }
 
+/// One engine test-case handle, shared by every copy of the `TestCase`
+/// that wraps it. `TestCase` is a copyable value, so a property or a
+/// generator can keep one past the invocation it was handed to, and the
+/// case is freed when that invocation ends. `end` frees the handle and
+/// leaves NULL behind for the copies, which libhegel answers with
+/// HEGEL_E_INVALID_HANDLE rather than reading freed memory.
+///
+/// Not synchronised: `TestCase` is not `Sendable`, so the copies are on the
+/// task that drives the case, which is also the one that ends it.
+final class CaseHandle {
+    private(set) var raw: OpaquePointer?
+
+    init(_ raw: OpaquePointer) { self.raw = raw }
+
+    func end(_ ctx: Context) {
+        _ = hegel_test_case_free(ctx.raw, raw)
+        raw = nil
+    }
+}
+
 /// A single test case: the handle a test body draws generated values from.
 ///
 /// This is what `Gen.run` receives. It wraps the `(hegel_context_t*,
 /// hegel_test_case_t*)` pair every draw call needs, and owns neither —
 /// the `Runner` manages both lifetimes around the test body.
+///
+/// A `TestCase` is valid for the one invocation it is passed to. A copy
+/// kept past it throws `HegelError.invalidArgument` from every draw.
 public struct TestCase {
     let ctx: Context
-    let raw: OpaquePointer
+    private let handle: CaseHandle
+
+    init(ctx: Context, raw: OpaquePointer) {
+        self.ctx = ctx
+        self.handle = CaseHandle(raw)
+    }
+
+    /// NULL once the case has ended.
+    var raw: OpaquePointer? { handle.raw }
+
+    /// Frees the engine handle. Called once by whoever made the case, when
+    /// the invocation it was made for is over.
+    func end() { handle.end(ctx) }
 
     @inline(__always)
     func call(_ code: hegel_result_t) throws(HegelError) {
-        try check(code, ctx.lastError)
+        try check(code, raw == nil ? "this TestCase's test case has ended; a TestCase is valid only for the invocation it was passed to" : ctx.lastError)
     }
 
     // MARK: - Scalar draws

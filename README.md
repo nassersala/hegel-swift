@@ -421,7 +421,7 @@ try await forAll(scripts, timeout: .seconds(2)) { script, tc in
 }
 ```
 
-Cancelling the calling task cancels the property; `CancellationError` propagates and is never a counterexample. `timeout` bounds one invocation and throws `PropertyTimeout`. It works by cancelling the property's task, so a body that never reaches a cancellation point still hangs. `TestCase` is not `Sendable`: draw, `await`, draw again is fine; two concurrent draws return `HegelError.concurrentUse`.
+Cancelling the calling task cancels the property; `CancellationError` propagates and is never a counterexample. `timeout` bounds one invocation and throws `PropertyTimeout`. It works by cancelling the property's task, so a body that never reaches a cancellation point still hangs. `TestCase` is not `Sendable`: draw, `await`, draw again is fine; two concurrent draws return `HegelError.concurrentUse`. A `TestCase` is valid for the invocation it is passed to; a copy kept past it throws `HegelError.invalidArgument` from every draw.
 
 ## Example: affordance correctness
 

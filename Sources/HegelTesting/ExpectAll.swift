@@ -165,7 +165,14 @@ public func expectAll<A>(
                   let value = try? replay(gen, blob: blob, settings: settings) else {
                 continue
             }
-            do { try await property(value) } catch {
+            // A property invocation like the run's, so `timeout` bounds it.
+            do {
+                if let timeout {
+                    try await withTimeout(timeout, origin: origin) { try await property(value) }
+                } else {
+                    try await property(value)
+                }
+            } catch {
                 Issue.record(error, sourceLocation: sourceLocation)
             }
         }

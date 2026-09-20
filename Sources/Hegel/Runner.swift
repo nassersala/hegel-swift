@@ -156,7 +156,7 @@ final class Run<A> {
     }
 
     func free(_ tc: TestCase) {
-        _ = hegel_test_case_free(ctx.raw, tc.raw)
+        tc.end()
     }
 
     func complete(_ tc: TestCase, _ status: TestCaseStatus, bugOrigin: String? = nil) throws {
@@ -239,17 +239,18 @@ final class Run<A> {
     /// (the property) runs on the same case, so an error that names the
     /// value names the shrunk one. Best-effort: a blob that no longer
     /// replays leaves both unavailable and the error falls back to
-    /// `lastErrors`.
+    /// `lastErrors`. Cancellation out of the re-run propagates, as it does
+    /// out of the loop.
     func result(_ rerun: (A, TestCase) throws -> Void) throws {
         guard let raw = try rawFailures() else { return }
-        throw PropertyFailure(failures: raw.map { f in
+        throw PropertyFailure(failures: try raw.map { f in
             var counterexample: String?
             var error: (any Error)?
             if let blob = f.blob, let replayed = try? ReplayedCase(blob: blob, settings: settings) {
                 if let value = try? gen.run(replayed.tc) {
                     counterexample = String(describing: value)
-                    do { try rerun(value, replayed.tc) } catch let thrown { error = Self.verdictError(thrown) }
-                    replayed.complete(.valid)
+                    defer { replayed.complete(.valid) }
+                    do { try rerun(value, replayed.tc) } catch let thrown { error = try Self.verdictError(thrown) }
                 } else {
                     replayed.complete(.overrun)
                 }
@@ -264,13 +265,16 @@ final class Run<A> {
         guard let raw = try rawFailures() else { return }
         var failures: [Failure] = []
         for f in raw {
+            // As in the loop: a cancelled caller gets no further property
+            // invocations, whether or not the property honours cancellation.
+            try Task.checkCancellation()
             var counterexample: String?
             var error: (any Error)?
             if let blob = f.blob, let replayed = try? ReplayedCase(blob: blob, settings: settings) {
                 if let value = try? gen.run(replayed.tc) {
                     counterexample = String(describing: value)
-                    do { try await rerun(value, replayed.tc) } catch let thrown { error = Self.verdictError(thrown) }
-                    replayed.complete(.valid)
+                    defer { replayed.complete(.valid) }
+                    do { try await rerun(value, replayed.tc) } catch let thrown { error = try Self.verdictError(thrown) }
                 } else {
                     replayed.complete(.overrun)
                 }
@@ -283,10 +287,14 @@ final class Run<A> {
 
     /// An error the re-run threw, if it is a verdict on the property. The
     /// engine's control flow (`stopTest`, `assume`) and a timeout are not;
-    /// they leave the fallback in place.
-    private static func verdictError(_ error: any Error) -> (any Error)? {
+    /// they leave the fallback in place, since the run already has its
+    /// verdict and a re-run that hangs is a property that did not fail the
+    /// same way twice. Cancellation is the caller's and propagates, as
+    /// `verdict(for:)` has it in the loop.
+    private static func verdictError(_ error: any Error) throws -> (any Error)? {
         switch error {
-        case is HegelError, is PropertyTimeout, is CancellationError: nil
+        case is CancellationError: throw error
+        case is HegelError, is PropertyTimeout: nil
         default: error
         }
     }
@@ -468,7 +476,8 @@ private struct Unchecked<T>: @unchecked Sendable {
 /// and `PropertyTimeout` is thrown once the body has actually stopped (a
 /// task group never abandons a child, so the engine's "one driver at a
 /// time" contract holds: nothing draws on the case after we return).
-private func withTimeout(
+/// `package` for HegelTesting: `expectAll` invokes the body once itself.
+package func withTimeout(
     _ timeout: Duration,
     origin: String,
     _ body: () async throws -> Void

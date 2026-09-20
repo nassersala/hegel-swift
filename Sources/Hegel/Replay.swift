@@ -40,7 +40,6 @@ public func replay<A>(
 final class ReplayedCase {
     private let ctx = Context()
     private let rawSettings: OpaquePointer?
-    private let rawCase: OpaquePointer?
     private let outputBox: OutputBox?
     let tc: TestCase
 
@@ -60,7 +59,6 @@ final class ReplayedCase {
                     &rawCase),
                 ctx.lastError)
             self.rawSettings = rawSettings
-            self.rawCase = rawCase
             self.outputBox = outputBox
             self.tc = TestCase(ctx: ctx, raw: rawCase!)
         } catch {
@@ -70,11 +68,11 @@ final class ReplayedCase {
     }
 
     func complete(_ status: TestCaseStatus) {
-        _ = hegel_mark_complete(ctx.raw, rawCase, status.rawValue, nil)
+        _ = hegel_mark_complete(ctx.raw, tc.raw, status.rawValue, nil)
     }
 
     deinit {
-        _ = hegel_test_case_free(ctx.raw, rawCase)
+        tc.end()
         _ = hegel_settings_free(ctx.raw, rawSettings)
         withExtendedLifetime(outputBox) {}
     }

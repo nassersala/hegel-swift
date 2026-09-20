@@ -121,13 +121,12 @@ public func forAll<State>(
         var sm: OpaquePointer?
         try withCStringArray(rules.map(\.name)) { ruleNames, ruleCount in
             try withCStringArray(invariants.map(\.name)) { invariantNames, invariantCount in
-                try check(
+                try tc.call(
                     hegel_new_state_machine(
                         tc.ctx.raw, tc.raw,
                         ruleNames, ruleCount,
                         invariantNames, invariantCount,
-                        &sm),
-                    tc.ctx.lastError)
+                        &sm))
             }
         }
         defer { _ = hegel_state_machine_free(tc.ctx.raw, sm) }
@@ -237,9 +236,7 @@ public final class Pool<Value> {
     /// Creates an empty pool on `testCase`.
     public init(_ testCase: TestCase) throws(HegelError) {
         var pool: OpaquePointer?
-        try check(
-            hegel_new_pool(testCase.ctx.raw, testCase.raw, &pool),
-            testCase.ctx.lastError)
+        try testCase.call(hegel_new_pool(testCase.ctx.raw, testCase.raw, &pool))
         self.ctx = testCase.ctx
         self.raw = pool!
     }
@@ -254,9 +251,7 @@ public final class Pool<Value> {
     /// Adds `value` to the pool.
     public func add(_ value: Value, _ testCase: TestCase) throws(HegelError) {
         var id: Int64 = 0
-        try check(
-            hegel_pool_add(testCase.ctx.raw, testCase.raw, raw, &id),
-            testCase.ctx.lastError)
+        try testCase.call(hegel_pool_add(testCase.ctx.raw, testCase.raw, raw, &id))
         values[id] = value
     }
 
@@ -266,9 +261,7 @@ public final class Pool<Value> {
     /// when that churn matters.
     public func draw(_ testCase: TestCase, consume: Bool = false) throws(HegelError) -> Value {
         var id: Int64 = 0
-        try check(
-            hegel_pool_generate(testCase.ctx.raw, testCase.raw, raw, consume, &id),
-            testCase.ctx.lastError)
+        try testCase.call(hegel_pool_generate(testCase.ctx.raw, testCase.raw, raw, consume, &id))
         guard let value = consume ? values.removeValue(forKey: id) : values[id] else {
             preconditionFailure("libhegel chose id \(id) which this pool never recorded")
         }
