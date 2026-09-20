@@ -25,11 +25,11 @@ import AboveTheCode
     }
 
     static func run(_ f: StreamFunction, inputs x: [Int], prefetch: Bool, policy: @escaping Scheduler.Policy,
-                    maxSteps: Int = 10_000, grace: Duration = .milliseconds(50), waitsForTick: Bool = true) -> Run {
+                    maxSteps: Int = 10_000, waitsForTick: Bool = true) -> Run {
         let scheduler = Scheduler()
         let clock = scheduler.clock
         let tape = Tape()
-        let outcome = scheduler.run(policy: policy, maxSteps: maxSteps, grace: grace) {
+        let outcome = scheduler.run(policy: policy, maxSteps: maxSteps) {
             await withTaskGroup(of: Void.self) { group in
                 group.addTask { await f.run(on: tape, ticks: x.count, waitsForTick: waitsForTick) }
                 group.addTask { await drive(tape, inputs: x, prefetch: prefetch, clock: clock) }
@@ -167,20 +167,12 @@ import AboveTheCode
     /// no tick is ever refused: every recorded moment is a step. All the
     /// run can say is that the budget ran out, and no budget separates
     /// "not yet" from "never". The type checker would have said never.
-    ///
-    /// The spinner polls with `Task.yield()`. Before the Swift 6.2 runtime
-    /// a yield is enqueued on the global pool and only its resumption
-    /// comes back to the scheduler, so it is escaped work and gets the 2 s
-    /// grace the escape tests use: on the macOS 15 runner, under load, it
-    /// did not come back inside the default 50 ms and the run ended stuck
-    /// after 6 steps instead of running out of budget. From 6.2 a yield
-    /// stays on the current executor and the grace is never waited for.
     @Test(.propertyTesting) func spinningIsOnlyAStepBudget() {
         var budgets: [Int] = []
         expectAll(Self.cases(ticks: 2...6), testCases: 100, database: "") { x, prefetch, schedule in
             let good = Self.run(.runningAverage, inputs: x, prefetch: prefetch, policy: schedule.policy)
             let budget = good.steps * 4
-            let run = Self.run(.spins, inputs: x, prefetch: prefetch, policy: schedule.policy, maxSteps: budget, grace: .seconds(2))
+            let run = Self.run(.spins, inputs: x, prefetch: prefetch, policy: schedule.policy, maxSteps: budget)
             #expect(run.outcome == .runaway, "\(run.outcome)")
             let (violation, final) = Causal.refines(run.moments, window: 0)
             #expect(violation == nil, "\(String(describing: violation))")

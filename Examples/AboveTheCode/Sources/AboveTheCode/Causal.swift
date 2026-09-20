@@ -319,12 +319,27 @@ public enum StreamFunction: Sendable, CaseIterable, CustomStringConvertible {
             case .spins:
                 sum += await tape.read(t)
                 if t == 1 {
-                    while !tape.hasInput(n + 1) { await Task.yield() }
+                    while !tape.hasInput(n + 1) { await poll() }
                 }
                 tape.emit(t, sum / (t + 1), holding: [])
             }
         }
     }
+}
+
+/// One turn of a polling loop: a suspension that stays on the task's
+/// executor on every runtime, so the controlled scheduler counts it as a
+/// step. `Task.yield()` is that only from the Swift 6.2 runtime. Before it
+/// a yield is enqueued on the global pool, and under the controlled
+/// scheduler that is escaped work which needs a free pool thread to come
+/// back. `Scheduler.run` blocks the thread it is called on, Swift Testing
+/// runs tests in parallel on the same pool, and a three-core runner has
+/// three threads: with all of them held, the yield never returned, the run
+/// ended stuck after 6 steps instead of running out of budget, and no grace
+/// was long enough (50 ms and 2 s failed alike on macos-15). An empty child
+/// task is enqueued on the task's executor everywhere.
+func poll() async {
+    await withTaskGroup(of: Void.self) { $0.addTask {} }
 }
 
 /// The environment: the clock and the input source as one task. The
