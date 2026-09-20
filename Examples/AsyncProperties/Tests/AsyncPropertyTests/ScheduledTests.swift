@@ -91,12 +91,14 @@ extension AsyncProperties {
 
         /// Instrumentation, as the spec asks before claiming exploration:
         /// on a script with ties, drawn schedules must reach choice points
-        /// and produce more than one distinct trace.
+        /// and produce more than one distinct trace. Seeded: the second
+        /// trace needs one particular deviation, and an unseeded 300 cases
+        /// drew none about once in 33 runs.
         @Test func schedulesChangeOutcomes() throws {
             let script = Script(sources: [[.value, .delay(1), .failure], [.value, .value, .value, .finish]], consumer: [.wait(1), .next, .next])
             #expect(script.inputDiagrams == ["a-^", "ABC|"] && script.outputDiagram == "-xx")
             var traces = Set<String>(), choice = 0, width = 0
-            try forAll(TieSchedule.gen, testCases: 300, database: "") { schedule in
+            try forAll(TieSchedule.gen, testCases: 300, seed: 1, database: "") { schedule in
                 let t = try Harness.combineLatest(script, schedule: schedule)
                 traces.insert(t.description)
                 choice = max(choice, t.choicePoints)

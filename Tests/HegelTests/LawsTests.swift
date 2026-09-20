@@ -226,9 +226,14 @@ private func counterexamples(
         #expect(!byDefault.isEmpty)
         // Equivalence classes: both laws, the minimal class. Seeded, and CI
         // sets SWIFT_DETERMINISTIC_HASHING: the Set-counts law only shows
-        // when the two ==-equal memos hash to different buckets, and Hasher
-        // is seeded per process, so an unlucky process misses it (seen
-        // about one run in twenty before this).
+        // when the two ==-equal memos land in different buckets, which
+        // depends on the Hasher's per-process seed and on the Set's
+        // per-instance seed, taken from its storage address. So the verdict
+        // moves with whatever else has allocated in the process: without
+        // the variable this passes alone (0 of 10) and misses the second
+        // law in the full suite, about one run in five on libhegel 0.43
+        // (one in twenty on 0.32), whatever the seed (nine tried, none
+        // better than 2 in 15).
         let found = try counterexamples(Laws.hashable(memos, equivalents: classes), seed: 2)
         #expect(found.count == 2)
         #expect(found.contains {

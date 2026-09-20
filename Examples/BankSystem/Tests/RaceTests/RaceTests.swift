@@ -131,10 +131,11 @@ import Schedules
     }
 
     /// The timeout path is exercised: some delayed run has a `timeout`
-    /// and some has a `giveUp`, and both refine.
+    /// and some has a `giveUp`, and both refine. Seeded: a give-up is rare
+    /// (about 3 runs in 200), so an unseeded run had none 3 times in 15.
     @Test func timeoutsAndGiveUpsAreReached() throws {
         var timeouts = 0, giveUps = 0
-        try forAll(Hegel.zip(Self.delays, Self.schedules), testCases: 200, database: "") { delays, schedule in
+        try forAll(Hegel.zip(Self.delays, Self.schedules), testCases: 200, seed: 1, database: "") { delays, schedule in
             let run = runSystem(bal: 10, scripts: [[.wd(4)], [.wd(7)]], delays: delays, policy: schedule.policy)
             try Self.check(run, bal: 10, scripts: [[.wd(4)], [.wd(7)]])
             if run.records.contains(where: { if case .timeout = $0.step { true } else { false } }) { timeouts += 1 }

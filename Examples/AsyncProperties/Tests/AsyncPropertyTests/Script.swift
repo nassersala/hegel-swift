@@ -210,20 +210,26 @@ extension Script {
         return Hegel.zip(array(of: body, count: 0...UInt64(maxValues)), ending).map { $0 + $1 }
     }
 
-    static func demand(allowCancel: Bool, count: ClosedRange<UInt64> = 0...8) -> Gen<[Demand]> {
+    /// With `alwaysCancel` the consumer ends in a cancel outright. It is the
+    /// same distribution as filtering `allowCancel` scripts for one, since
+    /// the 0.3 draw is independent of the steps, without rejecting seven
+    /// cases in ten: an opening streak of 50 rejections before 10 accepted
+    /// cases fails the engine's FilterTooMuch health check, which the
+    /// cancellation laws hit about once in a hundred runs each.
+    static func demand(allowCancel: Bool, alwaysCancel: Bool = false, count: ClosedRange<UInt64> = 0...8) -> Gen<[Demand]> {
         let step: Gen<Demand> = Gen<Int64>.int(in: 0...4).flatMap { k in
             k < 3 ? Gen { _ in .next } : Gen<Int64>.int(in: 1...3).map { .wait(Int($0)) }
         }
         let steps = array(of: step, count: count)
         guard allowCancel else { return steps }
+        if alwaysCancel { return steps.map { $0 + [.cancel] } }
         return Hegel.zip(steps, .bool(probability: 0.3)).map { $0 + ($1 ? [.cancel] : []) }
     }
 
     /// Scripts with a cancel, followed by two more demands: what a
     /// `for await` loop does after its task is cancelled.
     static func cancelling(sources count: ClosedRange<UInt64>) -> Gen<Script> {
-        gen(sources: count, endings: .any, allowCancel: true, enoughDemand: false)
-            .filter { $0.cancelTick != nil }
+        gen(sources: count, endings: .any, allowCancel: true, alwaysCancel: true, enoughDemand: false)
             .map { s in Script(sources: s.sources, consumer: s.consumer + [.next, .next]) }
     }
 
@@ -234,9 +240,10 @@ extension Script {
         sources count: ClosedRange<UInt64>,
         endings: Endings,
         allowCancel: Bool,
+        alwaysCancel: Bool = false,
         enoughDemand: Bool
     ) -> Gen<Script> {
-        Hegel.zip(array(of: source(endings: endings), count: count), demand(allowCancel: allowCancel))
+        Hegel.zip(array(of: source(endings: endings), count: count), demand(allowCancel: allowCancel, alwaysCancel: alwaysCancel))
             .map { sources, consumer in
                 var script = Script(sources: sources, consumer: consumer)
                 if enoughDemand {
