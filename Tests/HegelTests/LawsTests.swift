@@ -224,22 +224,34 @@ private func counterexamples(
         // Default batch: the engine's bias finds it, not always in both laws.
         let byDefault = try counterexamples(Laws.hashable(memos))
         #expect(!byDefault.isEmpty)
-        // Equivalence classes: both laws, the minimal class. Seeded, and CI
-        // sets SWIFT_DETERMINISTIC_HASHING: the Set-counts law only shows
-        // when the two ==-equal memos land in different buckets, which
-        // depends on the Hasher's per-process seed and on the Set's
-        // per-instance seed, taken from its storage address. So the verdict
-        // moves with whatever else has allocated in the process: without
-        // the variable this passes alone (0 of 10) and misses the second
-        // law in the full suite, about one run in five on libhegel 0.43
-        // (one in twenty on 0.32), whatever the seed (nine tried, none
-        // better than 2 in 15).
+        // Equivalence classes: both laws, the minimal class. Seeded because
+        // it names the counterexample. It used to need
+        // SWIFT_DETERMINISTIC_HASHING as well, and without it missed the
+        // Set-counts law about one plain run in five: see `setCounts`.
         let found = try counterexamples(Laws.hashable(memos, equivalents: classes), seed: 2)
         #expect(found.count == 2)
         #expect(found.contains {
             $0.contains("law: a == b ⇒ hash(a) == hash(b)\n  [HegelTests.LawsTests.Memo(key: 0, cache: 0), HegelTests.LawsTests.Memo(key: 0, cache: 1)]")
         })
         #expect(found.contains { $0.contains("law: Set counts ==-distinct values") && $0.contains("violated: Set(xs).count = 2, ==-distinct count = 1") })
+    }
+
+    /// The Set-counts law must be a function of its input. One Set is not:
+    /// whether it counts two ==-equal values twice depends on its storage
+    /// address, so the same class was a violation in one process and not in
+    /// the next, and within a process the answer changed as the heap did.
+    /// Churn the heap between observations and ask every time.
+    @Test func setCountsSeesUnequalHashesWhateverTheHeapDoes() {
+        let twice = [Memo(key: 0, cache: 0), Memo(key: 0, cache: 1)]
+        var churn: [[Int]] = []
+        for round in 0..<2000 {
+            #expect(setCounts(twice).contains(2), "round \(round)")
+            churn.append([Int](repeating: round, count: round % 61 + 1))
+            if round % 7 == 0 { churn.removeFirst(churn.count / 2) }
+        }
+        // A lawful type is never miscounted, at any capacity.
+        #expect(Set(setCounts([1, 2, 2, 3, 3, 3])) == [3])
+        #expect(setCounts([Int]()) == [0, 0, 0, 0, 0, 0])
     }
 
     @Test func intStringBindingIsNotALens() throws {

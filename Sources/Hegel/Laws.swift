@@ -192,6 +192,26 @@ func requireEqual<T>(
     guard equal(lhsValue, rhsValue) else { throw LawViolated(lhs, lhsValue, rhs, rhsValue) }
 }
 
+/// `Set(xs).count`, observed through six Sets rather than one. A Set counts
+/// two `==`-equal values with different hashes twice only when they land in
+/// different buckets, and where they land depends on the Set's own seed:
+/// its storage address, or its scale under SWIFT_DETERMINISTIC_HASHING. One
+/// Set of two such values misses the bug one time in four. A second Set
+/// built after the first is freed gets the same address and so the same
+/// answer, which made the verdict a function of the process's heap and not
+/// of the input: 0 of 2000 in one process, all 2000 in another. Sets held
+/// alive at doubling capacities differ in address, scale and bucket count;
+/// for two values, all six missing is 1 in 2^27.
+func setCounts<T: Hashable>(_ xs: [T]) -> [Int] {
+    var sets: [Set<T>] = []
+    for shift in 0..<6 {
+        var set = Set<T>(minimumCapacity: xs.count << shift)
+        for x in xs { set.insert(x) }
+        sets.append(set)
+    }
+    return sets.map(\.count)
+}
+
 func pair<T>(_ gen: Gen<T>) -> Gen<(a: T, b: T)> {
     zip(gen, gen).map { (a: $0.0, b: $0.1) }
 }
@@ -591,7 +611,8 @@ extension Laws {
     }
 
     /// `Hashable`: `a == b ⇒ hash(a) == hash(b)`, the same law observed
-    /// through `Set`, and `hash` being a function of the value. The bug this
+    /// through `Set` (several Sets: see `setCounts`), and `hash` being a
+    /// function of the value. The bug this
     /// exists for is `==` ignoring a field that `hash(into:)` includes — the
     /// reverse (hashing a subset of what `==` compares) is legal and is not
     /// flagged. Pass `equivalents:` to make the premise hold; see
@@ -611,7 +632,10 @@ extension Laws {
             Law("Set counts ==-distinct values", xs) { xs in
                 var distinct = 0
                 for i in xs.indices where !xs[..<i].contains(xs[i]) { distinct += 1 }
-                try requireEqual("Set(xs).count", Set(xs).count, "==-distinct count", distinct, ==)
+                let counts = setCounts(xs)
+                try requireEqual(
+                    "Set(xs).count", counts.first { $0 != distinct } ?? distinct,
+                    "==-distinct count", distinct, ==)
             },
             Law("hash is a function", gen) { a in
                 try requireEqual("hash(a)", a.hashValue, "hash(a) again", a.hashValue, ==)
