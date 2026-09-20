@@ -107,7 +107,7 @@ import Ledger
     /// input is the smallest: one request delivered twice, one deviation.
     @Test func awaitBetweenCheckAndCommitIsNotAStep() throws {
         do {
-            try forAll(Self.inputs, seed: 1, database: "") { s, schedule in
+            try forAll(Self.inputs, seed: 2, database: "") { s, schedule in
                 _ = try Self.checkRefines(s, Self.deliver(s, schedule.policy, journalBeforeCommit: true))
             }
             Issue.record("the suspension was never exploited")

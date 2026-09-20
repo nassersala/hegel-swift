@@ -3,7 +3,7 @@
 # dialectic must interpret the same seed into the same choice sequence.
 # Every harness in Conformance/ runs the same draw programs (identical
 # arguments to identical libhegel calls, seed 42, derandomized, database
-# off) against libhegel 0.32.5: the vendored CHegel framework dylib for
+# off) against libhegel 0.43.1: the vendored CHegel framework dylib for
 # swift, go (loaded via HEGEL_LIBHEGEL_PATH) and dialectic (linked
 # directly); the rust column links its own copy of the same engine
 # version statically, so it is the reference the engine's own language
@@ -15,19 +15,36 @@
 #
 # Requires a Go toolchain (brew install go) and cargo (brew install rust).
 # The dialectic column is optional: set DIALECTIC_DIR to a dialectic
-# checkout (and have cmake installed) to include it.
+# checkout (and have cmake installed) to include it. dialectic v0.1 is
+# written against the libhegel 0.32 ABI (the HEGEL_LABEL_* constants,
+# hegel_settings_set_stateful_step_count) and does not build against
+# 0.43.1; leave DIALECTIC_DIR unset until it is ported.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 LIBHEGEL="$REPO_DIR/Vendor/CHegel.xcframework/macos-arm64/CHegel.framework/Versions/A/CHegel"
 DIALECTIC_DIR="${DIALECTIC_DIR:-}"
 PROGRAMS="primitives bigints text strings lists stateful stateful-reject"
-# Divergences confirmed real and reported upstream, as column:program.
-# They print instead of failing the run until the fix lands.
-#   go:stateful-reject  hegel-go never calls hegel_state_machine_rule_rejected
-#                       (hegeldev/hegel-go#135), so a rejected rule is charged
-#                       to its step budget.
-KNOWN="go:stateful-reject"
+# Divergences confirmed real, as column:program. They print instead of
+# failing the run. All three are hegel-go v0.9.5 against the Rust reference
+# on libhegel 0.43.1, and none is reported upstream yet.
+#   go:lists            hegel-go hashes its span labels with a process-local
+#                       maphash of the generator's name, so a list of integers
+#                       and a list of booleans share a label; the reference
+#                       folds the element generator's label in. The engine's
+#                       mutation reads label identity, and the transcripts part
+#                       at case 11, where mutation starts. (hegel-swift had the
+#                       same divergence until drawCollection folded the element
+#                       type in.)
+#   go:stateful         hegel-go runs a sequential machine through its
+#   go:stateful-reject  concurrent path: each round clones the test case and
+#                       the worker's rule draws land on the clone's choice
+#                       stream, where the reference's sequential runner draws
+#                       everything on the root handle. (hegeldev/hegel-go#135,
+#                       the missing hegel_state_machine_rule_rejected call that
+#                       used to be the reason for stateful-reject, is fixed in
+#                       this release.)
+KNOWN="go:lists go:stateful go:stateful-reject"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
@@ -92,7 +109,7 @@ for program in $PROGRAMS; do
             if diff -u "$OUT/$program.rust.txt" "$OUT/$program.$column.txt" > "$OUT/$program.$column.diff"; then
                 compared="$compared $column"
             elif [[ " $KNOWN " == *" $column:$program "* ]]; then
-                echo "== $program: $column disagrees with rust (known, reported upstream; $(wc -l < "$OUT/$program.$column.txt" | tr -d ' ') lines)"
+                echo "== $program: $column disagrees with rust (known, see KNOWN in this script; $(wc -l < "$OUT/$program.$column.txt" | tr -d ' ') lines)"
             else
                 echo "FAIL: $program: $column disagrees with rust" >&2
                 cat "$OUT/$program.$column.diff" >&2

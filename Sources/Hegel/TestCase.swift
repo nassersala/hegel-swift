@@ -116,10 +116,40 @@ public struct TestCase {
 
     // MARK: - Structure
 
+    /// A span label for the generator called `name`: the 64-bit FNV-1a
+    /// hash of its UTF-8 bytes, which is what `hegel_label_from_name`
+    /// computes (AbiMirrorTests holds the two equal). A label means nothing to
+    /// the engine beyond identity: spans with the same label are taken to
+    /// come from the same generator, and so to be candidates for swapping,
+    /// duplicating and reordering with each other. Prefix the name with
+    /// your library's; `hegel.<kind>` names are libhegel's own.
+    public static func label(_ name: String) -> UInt64 {
+        fnv1a(fnvOffsetBasis, name.utf8)
+    }
+
+    /// The label for a generator built from others: its own label first,
+    /// its components' after, so a list of integers and a list of strings
+    /// differ while every list of integers agrees. What
+    /// `hegel_label_combine` computes: FNV-1a continued over each label's
+    /// little-endian bytes. Order matters, and combining one label does
+    /// not give it back.
+    public static func label(combining labels: [UInt64]) -> UInt64 {
+        labels.reduce(fnvOffsetBasis) { hash, label in
+            withUnsafeBytes(of: label.littleEndian) { fnv1a(hash, $0) }
+        }
+    }
+
+    private static let fnvOffsetBasis: UInt64 = 0xcbf2_9ce4_8422_2325
+    private static func fnv1a(_ hash: UInt64, _ bytes: some Sequence<UInt8>) -> UInt64 {
+        bytes.reduce(hash) { ($0 ^ UInt64($1)) &* 0x0000_0100_0000_01b3 }
+    }
+
+    static let listLabel = label("hegel-swift.list")
+    static let statefulRuleLabel = label("hegel-swift.stateful.rule")
+
     /// Groups the draws made inside `body` into a span, so the shrinker
     /// treats them as one unit. Every compound generator should use this.
-    /// `label` must be a stable value not reserved by libhegel (see the
-    /// hegel_label_t constants in hegel.h).
+    /// Derive `label` with `TestCase.label(_:)`.
     public func span<A>(label: UInt64, _ body: () throws -> A) throws -> A {
         try call(hegel_start_span(ctx.raw, raw, label))
         do {
@@ -136,7 +166,7 @@ public struct TestCase {
 
     /// Draws a variable-length collection: libhegel decides the length
     /// (within `sizes`) so the shrinker can delete elements; `element` is
-    /// invoked once per element. The whole draw sits in a `HEGEL_LABEL_LIST`
+    /// invoked once per element. The whole draw sits in a list-labelled
     /// span, as in the reference bindings: the engine's generation reads
     /// span structure, so leaving it out changes the choice sequence (the
     /// conformance harness diverged at case 11 of the lists program
@@ -145,7 +175,14 @@ public struct TestCase {
         count sizes: ClosedRange<UInt64>,
         element: () throws -> A
     ) throws -> [A] {
-        try span(label: UInt64(HEGEL_LABEL_LIST.rawValue)) {
+        // The element type stands in for the element generator's label, as
+        // the type name does in the reference frontend: `Gen` is a closure
+        // with no label of its own. Without it every list shares a label,
+        // the engine's mutation copies a list of integers over a list of
+        // booleans, and the lists conformance program parts from the
+        // reference at case 11, where mutation starts.
+        let label = Self.label(combining: [Self.listLabel, Self.label(String(reflecting: A.self))])
+        return try span(label: label) {
             var collection: OpaquePointer?
             try call(hegel_new_collection(ctx.raw, raw, sizes.lowerBound, sizes.upperBound, &collection))
             defer { _ = hegel_collection_free(ctx.raw, collection) }

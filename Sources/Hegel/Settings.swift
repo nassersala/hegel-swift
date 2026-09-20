@@ -29,11 +29,16 @@ public struct Settings: Sendable {
     public var reportMultipleFailures: Bool?
     /// Engine output verbosity. nil = engine default (.normal).
     public var verbosity: Verbosity?
-    /// Full test run, or a single generated case with no shrinking
-    /// (replay/exploration tooling). nil = engine default (.testRun).
+    /// `.singleTestCase` runs one generated case. libhegel 0.43 removed
+    /// the mode it used to set; upstream's replacement is a test-case
+    /// budget of one, which is what this now means. The one case is shrunk
+    /// if it fails, which the old mode did not do. nil = `.testRun`.
     public var mode: Mode?
     /// Target steps per stateful test case (at least 1; each case runs
-    /// 1...n steps). nil = engine default (50).
+    /// 1...n steps). nil = 50, the frontends' convention: the engine has
+    /// no default of its own and takes the count when a state machine is
+    /// created, so this is read by the stateful `forAll`, not by
+    /// `makeHandle`.
     public var statefulStepCount: Int64?
 
     public init(
@@ -78,21 +83,26 @@ public struct Settings: Sendable {
         public static let all: Phases = [.explicit, .reuse, .generate, .target, .shrink]
     }
 
-    /// `hegel_verbosity_t`.
+    /// `hegel_verbosity_t`. The raw values are the C enum's, and libhegel
+    /// 0.43 swapped the first two; AbiMirrorTests pins each of these
+    /// enums against the header so the next renumbering fails a test.
     public enum Verbosity: UInt32, Sendable {
-        case quiet = 0
-        case normal = 1
+        case normal = 0
+        case quiet = 1
         case verbose = 2
         case debug = 3
     }
 
-    /// `hegel_mode_t`.
+    /// See `mode`. The C enum this mirrored is gone.
     public enum Mode: UInt32, Sendable {
-        /// Full generate / shrink / replay loop. The engine default.
+        /// Full generate / shrink / replay loop.
         case testRun = 0
-        /// Exactly one generated test case, no shrinking.
+        /// A test-case budget of one.
         case singleTestCase = 1
     }
+
+    /// The step count a stateful run passes to the engine.
+    var resolvedStatefulStepCount: Int64 { statefulStepCount ?? 50 }
 
     /// Builds and configures a `hegel_settings_t` handle. The caller owns
     /// it and must free it with `hegel_settings_free`.
@@ -100,7 +110,9 @@ public struct Settings: Sendable {
         var handle: OpaquePointer?
         try check(hegel_settings_new(ctx.raw, &handle), ctx.lastError)
         do {
-            try check(hegel_settings_set_test_cases(ctx.raw, handle, testCases), ctx.lastError)
+            try check(
+                hegel_settings_set_test_cases(ctx.raw, handle, mode == .singleTestCase ? 1 : testCases),
+                ctx.lastError)
             if let seed {
                 try check(hegel_settings_set_seed(ctx.raw, handle, seed, true), ctx.lastError)
             }
@@ -124,14 +136,6 @@ public struct Settings: Sendable {
             }
             if let verbosity {
                 try check(hegel_settings_set_verbosity(ctx.raw, handle, verbosity.rawValue), ctx.lastError)
-            }
-            if let mode {
-                try check(hegel_settings_set_mode(ctx.raw, handle, mode.rawValue), ctx.lastError)
-            }
-            if let statefulStepCount {
-                try check(
-                    hegel_settings_set_stateful_step_count(ctx.raw, handle, statefulStepCount),
-                    ctx.lastError)
             }
         } catch {
             _ = hegel_settings_free(ctx.raw, handle)

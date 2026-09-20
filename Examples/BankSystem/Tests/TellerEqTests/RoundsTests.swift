@@ -5,8 +5,8 @@ import Hegel
 /// One test per round. Each prints the counterexample Hegel found and the
 /// goal at it; the assertion pins the goal so the round stays reproducible.
 @Suite struct Rounds {
-    func goal(_ born: Birth) throws -> String {
-        let g = try Session.stuckGoal(born: born)
+    func goal(_ born: Birth, seed: UInt64 = 1) throws -> String {
+        let g = try Session.stuckGoal(born: born, seed: seed)
         print("\n== born = \(born) ==\n\(g ?? "holds")")
         return g ?? "holds"
     }
@@ -16,7 +16,10 @@ import Hegel
     @Test func round3() throws { #expect(try goal(.pend) != "holds") }
     @Test func round4() throws { #expect(try goal(.tries).contains("no reply constructor")) }
     @Test func round5() throws { #expect(try goal(.reply).contains("the state has no out")) }
-    @Test func round6() throws { #expect(try goal(.out).contains("out has no such value")) }
+    // At `.out` two goals are open, this one and round 7's, and the seed
+    // decides which the engine reaches first: seed 1 reached this one on
+    // libhegel 0.32 and reaches round 7's on 0.43.
+    @Test func round6() throws { #expect(try goal(.out, seed: 3).contains("out has no such value")) }
     @Test func round7() throws { #expect(try goal(.unknown).contains("apply* (net (retry r)) b ∈")) }
     @Test func round8() throws { #expect(try goal(.id).contains("once a reply has been taken")) }
     @Test func final() throws { #expect(try goal(.settle) == "holds") }

@@ -24,7 +24,7 @@ SOFTWARE.
 
 Third-party notice: Vendor/CHegel.xcframework contains binaries of libhegel
 and its header hegel.h, built unmodified from the hegel-rust source at tag
-v0.32.5 (https://github.com/hegeldev/hegel-rust), which is licensed as
+libhegel-v0.43.1 (https://github.com/hegeldev/hegel-rust), which is licensed as
 follows:
 
 MIT License

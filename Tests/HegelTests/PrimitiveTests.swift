@@ -46,7 +46,8 @@ import Foundation
         let hi = TimeOfDay(hour: 17, minute: 0)
         try forAll(.time(in: lo...hi), database: "") { t in
             #expect(t >= lo && t <= hi)
-            #expect((0...999_999).contains(t.microsecond))
+            #expect((0...999_999_999).contains(t.nanosecond))
+            #expect(t.microsecond == t.nanosecond / 1000)
         }
     }
 

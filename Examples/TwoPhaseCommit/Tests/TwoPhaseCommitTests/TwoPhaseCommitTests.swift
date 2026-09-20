@@ -160,7 +160,7 @@ extension Scheduled { @Suite struct TwoPhase {
     /// found, since removing a participant renumbers the messages.
     @Test func heuristicAbortDisagrees() throws {
         do {
-            try forAll(Hegel.zip(Self.votes, Self.faults, Self.schedules), testCases: 500, seed: 1, database: "") { votes, faults, schedule in
+            try forAll(Hegel.zip(Self.votes, Self.faults, Self.schedules), testCases: 500, seed: 2, database: "") { votes, faults, schedule in
                 let run = twoPhaseCommit(votes: votes, faults: faults, bug: .heuristicAbort, retries: 1, policy: schedule.policy)
                 try Self.refines(run)
             }

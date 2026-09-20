@@ -5,7 +5,7 @@
 //! exits 2.
 
 use hegel::generators as gs;
-use hegel::stateful::{Rule, StateMachine};
+use hegel::stateful::{Invariant, Rule, StateMachine, machine};
 use hegel::{Hegel, Settings, TestCase, Verbosity};
 
 fn settings(cases: u64) -> Settings {
@@ -15,7 +15,6 @@ fn settings(cases: u64) -> Settings {
         .derandomize(true)
         .database(None)
         .verbosity(Verbosity::Quiet)
-        .stateful_step_count(6)
 }
 
 fn run(cases: u64, f: impl FnMut(TestCase)) {
@@ -106,17 +105,19 @@ fn non_neg(m: &mut Counter, _: TestCase) {
 
 impl StateMachine for Counter {
     fn rules(&self) -> Vec<Rule<Self>> {
-        vec![Rule::new("RuleAdd", add), Rule::new("RuleReset", reset)]
+        vec![Rule::new("RuleAdd", 1.0, add), Rule::new("RuleReset", 1.0, reset)]
     }
-    fn invariants(&self) -> Vec<Rule<Self>> {
-        vec![Rule::new("InvariantNonNeg", non_neg)]
+    // Always-run, as every other column's invariants are: a sampled
+    // invariant costs a draw per join point and the transcripts would part.
+    fn invariants(&self) -> Vec<Invariant<Self>> {
+        vec![Invariant::new_always_run("InvariantNonNeg", non_neg)]
     }
 }
 
 fn stateful(reject: bool) {
     run(8, |tc| {
         println!("case");
-        hegel::stateful::run(Counter { n: 0, reject }, tc);
+        machine(Counter { n: 0, reject }).steps(6).run(tc);
     });
 }
 

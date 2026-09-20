@@ -21,7 +21,6 @@ func options(cases int) []hegel.Option {
 		hegel.WithDerandomize(true),
 		hegel.WithDatabase(""),
 		hegel.WithVerbosity(hegel.VerbosityQuiet),
-		hegel.WithStatefulStepCount(6),
 	}
 }
 
@@ -112,7 +111,11 @@ func (m *Counter) InvariantNonNeg(tc hegel.TestCase) {
 func stateful(reject bool) {
 	run(8, func(tc hegel.TestCase) {
 		fmt.Println("case")
-		hegel.RunStateful(tc, &Counter{reject: reject})
+		// Always-check, as every other column's invariants are: a sampled
+		// invariant costs a draw per join point and the transcripts would part.
+		hegel.RunStateful(tc, &Counter{reject: reject},
+			hegel.WithStatefulStepCount(6),
+			hegel.WithAlwaysCheckInvariants("InvariantNonNeg"))
 	})
 }
 

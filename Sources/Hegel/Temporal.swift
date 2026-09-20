@@ -47,50 +47,60 @@ public struct CalendarDate: Hashable, Comparable, Sendable, CustomStringConverti
     }
 }
 
-/// A time of day, mirroring `hegel_time_t`.
+/// A time of day, mirroring `hegel_time_t`. libhegel 0.43 draws whole
+/// nanoseconds where 0.32 drew microseconds, so `nanosecond` is the stored
+/// field and `microsecond` is read off it.
 public struct TimeOfDay: Hashable, Comparable, Sendable, CustomStringConvertible {
-    public var hour: Int         // 0...23
-    public var minute: Int       // 0...59
-    public var second: Int       // 0...59
-    public var microsecond: Int  // 0...999999
+    public var hour: Int        // 0...23
+    public var minute: Int      // 0...59
+    public var second: Int      // 0...59
+    public var nanosecond: Int  // 0...999999999
 
-    public init(hour: Int, minute: Int, second: Int = 0, microsecond: Int = 0) {
+    public init(hour: Int, minute: Int, second: Int = 0, nanosecond: Int = 0) {
         self.hour = hour
         self.minute = minute
         self.second = second
-        self.microsecond = microsecond
+        self.nanosecond = nanosecond
     }
 
+    public init(hour: Int, minute: Int, second: Int = 0, microsecond: Int) {
+        self.init(hour: hour, minute: minute, second: second, nanosecond: microsecond * 1000)
+    }
+
+    /// The whole microseconds in `nanosecond`; a drawn time can have
+    /// nanoseconds below them.
+    public var microsecond: Int { nanosecond / 1000 }
+
     public static let midnight = TimeOfDay(hour: 0, minute: 0)
-    public static let endOfDay = TimeOfDay(hour: 23, minute: 59, second: 59, microsecond: 999_999)
+    public static let endOfDay = TimeOfDay(hour: 23, minute: 59, second: 59, nanosecond: 999_999_999)
 
     public static func < (a: TimeOfDay, b: TimeOfDay) -> Bool {
-        (a.hour, a.minute, a.second, a.microsecond) < (b.hour, b.minute, b.second, b.microsecond)
+        (a.hour, a.minute, a.second, a.nanosecond) < (b.hour, b.minute, b.second, b.nanosecond)
     }
 
     public var description: String {
         let base = String(format: "%02d:%02d:%02d", hour, minute, second)
-        return microsecond == 0 ? base : base + String(format: ".%06d", microsecond)
+        return nanosecond == 0 ? base : base + String(format: ".%09d", nanosecond)
     }
 
     public var dateComponents: DateComponents {
-        DateComponents(hour: hour, minute: minute, second: second, nanosecond: microsecond * 1000)
+        DateComponents(hour: hour, minute: minute, second: second, nanosecond: nanosecond)
     }
 
     func raw() throws(HegelError) -> hegel_time_t {
         guard (0...23).contains(hour), (0...59).contains(minute),
-              (0...59).contains(second), (0...999_999).contains(microsecond) else {
+              (0...59).contains(second), (0...999_999_999).contains(nanosecond) else {
             throw .invalidArgument("invalid time bound: \(self)")
         }
         return hegel_time_t(
             hour: UInt8(hour), minute: UInt8(minute), second: UInt8(second),
-            microsecond: UInt32(microsecond))
+            nanosecond: UInt32(nanosecond))
     }
 
     init(raw: hegel_time_t) {
         self.init(
             hour: Int(raw.hour), minute: Int(raw.minute), second: Int(raw.second),
-            microsecond: Int(raw.microsecond))
+            nanosecond: Int(raw.nanosecond))
     }
 }
 
@@ -115,7 +125,7 @@ public struct CalendarDateTime: Hashable, Comparable, Sendable, CustomStringConv
         DateComponents(
             year: date.year, month: date.month, day: date.day,
             hour: time.hour, minute: time.minute, second: time.second,
-            nanosecond: time.microsecond * 1000)
+            nanosecond: time.nanosecond)
     }
 
     func raw() throws(HegelError) -> hegel_datetime_t {

@@ -167,7 +167,7 @@ private func counterexamples(_ suite: LawSuite, testCases: UInt64 = 300) throws 
     @Test func squareRootDoesNotInvertSquaringAcrossTheBranchCut() throws {
         let suite = Laws.retraction(complexes, to: "square", { $0 * $0 }, from: "sqrt", { C.sqrt($0) }, equal: approx)
         do {
-            try forAll(suite, testCases: 300, seed: 1, database: "")
+            try forAll(suite, testCases: 300, seed: 7, database: "")
             Issue.record("expected the branch cut to fail")
         } catch let failure as PropertyFailure {
             let c = try #require(failure.failures.first?.counterexample)

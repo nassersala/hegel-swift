@@ -111,13 +111,17 @@ private struct LoginScreen: Sendable, CustomStringConvertible {
     }
 
     /// The resend bug shrinks to the six-step walk the experiment found:
-    /// enterPhone, send, badCode, resend, badCode, badCode.
+    /// enterPhone, send, badCode, resend, badCode, badCode. Seeded because
+    /// discovery is not certain in 300 cases: libhegel 0.43 picks rules
+    /// uniformly where 0.32 used its endpoint-biased integer draw, and a
+    /// walk that needs badCode twice running went from 30 of 30 seeds to
+    /// 20 of 30. Every seed that finds it shrinks to this walk.
     @Test func resendBugShrinksToTheSixStepWalk() throws {
         do {
             try forAll(
                 sut: Gen { _ in LoginScreen(resendResetsAttempts: true) }, model: login.initial,
                 commands: login.commands(run: { screen, s in screen.handle(s) }),
-                testCases: 300, seed: 1, database: "")
+                testCases: 300, seed: 3, database: "")
             Issue.record("the planted bug was not found")
         } catch let failure as PropertyFailure {
             let trace = try #require(failure.failures.first?.counterexample)

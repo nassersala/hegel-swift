@@ -134,7 +134,7 @@ func counterexample(_ body: () throws -> Void) -> String {
                 == [.readTicket, .lookupOrder, .requestApproval, .issueRefund, .requestApproval])
         // Sampled: the same plan, shrunk to.
         let ce = counterexample {
-            try forAll(plans(), testCases: 200, seed: 1, database: "") { p in
+            try forAll(plans(), testCases: 200, seed: 4, database: "") { p in
                 guard
                     handWrittenVerify(p, bug: .gateForgetsOneApprovalOneRefund)
                         == walk(p).isAccepted

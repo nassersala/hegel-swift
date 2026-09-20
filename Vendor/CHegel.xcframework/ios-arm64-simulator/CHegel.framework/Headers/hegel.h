@@ -72,6 +72,11 @@
  *     hegel_new_state_machine    ->  hegel_state_machine_free
  *     hegel_generate_bytes       ->  hegel_generate_bytes_result_free
  *     hegel_generate_string      ->  hegel_generate_string_result_free
+ *     hegel_printer_options_new  ->  hegel_printer_options_free
+ *     hegel_printer_new          ->  hegel_printer_free
+ *     hegel_printer_deferred     ->  hegel_printer_free
+ *     hegel_test_case_printer    ->  hegel_printer_free
+ *     hegel_printer_value        ->  hegel_printer_value_result_free
  *
  * Every other pointer libhegel hands back is a borrowed string. The caller
  * must not free it, and it is valid only until a documented point.
@@ -104,10 +109,12 @@
 
 /*
  Value written to `*out_rule_index` by `hegel_state_machine_next_rule`
- when the engine's step budget for the test case is exhausted: stop
- running rules.
+ when the calling worker's round budget is exhausted (stop running rules
+ and wait for the next group / join point), and to `*out_group_id` by
+ `hegel_state_machine_next_group` when the whole state machine is done
+ (run no further rounds).
  */
-#define HEGEL_STATE_MACHINE_DONE -1
+#define HEGEL_STATE_MACHINE_DONE INT64_MIN
 
 /*
  Result of a libhegel call. See "Calling convention" in the header
@@ -163,7 +170,61 @@ typedef enum {
      the handle instead.
      */
     HEGEL_E_CONCURRENT_USE = -9,
+    /*
+     A recursive generation attempt must be regenerated from the root.
+     From `hegel_recursion_leaf`, the attempt exceeded its leaf budget:
+     unwind it — drawing nothing further for it — back to where
+     `hegel_new_recursion` was called, then call `hegel_recursion_retry`
+     to discard it. From `hegel_recursion_finish`, the completed value
+     was mispriced and the engine has already discarded it: drop it and
+     start again from the root directly.
+     */
+    HEGEL_E_RETRY = -10,
 } hegel_result_t;
+
+/*
+ Verbosity of engine-emitted output (logs, per-case traces). Set via
+ `hegel_settings_set_verbosity`.
+ */
+typedef enum {
+    /*
+     A short summary line per run. The default.
+     */
+    HEGEL_VERBOSITY_NORMAL = 0,
+    /*
+     Nothing besides the final result.
+     */
+    HEGEL_VERBOSITY_QUIET = 1,
+    /*
+     Per-test-case progress and drawn values, plus panic diagnostics as
+     they happen.
+     */
+    HEGEL_VERBOSITY_VERBOSE = 2,
+    /*
+     As verbose, plus shrinker trace output.
+     */
+    HEGEL_VERBOSITY_DEBUG = 3,
+} hegel_verbosity_t;
+
+/*
+ Which source of randomness the engine draws from. Set via
+ `hegel_settings_set_backend`.
+ */
+typedef enum {
+    /*
+     Expand a single seeded PRNG (the base setting). Runs are
+     reproducible from the seed and shrinking / replay work as usual.
+     */
+    HEGEL_BACKEND_DEFAULT = 1,
+    /*
+     Read fresh entropy from `/dev/urandom` on every draw, falling back to
+     an OS-seeded PRNG on platforms without it. Intended for running under
+     Antithesis, whose fuzzer controls `/dev/urandom`, and selected by the
+     shipped `workload` profile; you almost certainly don't want it
+     otherwise.
+     */
+    HEGEL_BACKEND_URANDOM = 2,
+} hegel_backend_t;
 
 /*
  Aggregate outcome of a finished run, read via `hegel_run_result_status`.
@@ -178,12 +239,23 @@ typedef enum {
      */
     HEGEL_RUN_STATUS_FAILED = 1,
     /*
-     The run itself failed — a failed health check, a nondeterministic
-     test, a violated engine invariant — and produced no verdict on the
-     property. There are no failures to inspect; read the message with
+     The run itself failed — a failed health check, a nondeterminism
+     mismatch, a violated engine invariant — and produced no verdict on
+     the property. There are no failures to inspect; read the message with
      `hegel_run_result_error`.
      */
     HEGEL_RUN_STATUS_ERROR = 2,
+    /*
+     The property failed on a run that was declared nondeterministic (a
+     test case created a state machine with `max_concurrency > 1`). The
+     failures carry no reproduce blob — there was no shrinking and there
+     is no final replay — so the caller should report the bug from
+     whatever it captured while running the discovering test case (the
+     engine stamps every case of such a run nondeterministic up front,
+     see `hegel_test_case_is_nondeterministic`, precisely so the caller
+     captures each case's output as it runs).
+     */
+    HEGEL_RUN_STATUS_FAILED_NONDETERMINISTIC = 3,
 } hegel_run_status_t;
 
 /*
@@ -247,228 +319,6 @@ typedef enum {
      */
     HEGEL_HC_LARGE_INITIAL_TEST_CASE = (1 << 3),
 } hegel_health_check_t;
-
-/*
- Passed to `hegel_start_span`. libhegel opens spans around its own draws.
- If your Hegel library opens spans, give them labels libhegel has not
- reserved below, or shrinking may get slower.
- */
-typedef enum {
-    /*
-     Outer span around a list / sequence.
-     */
-    HEGEL_LABEL_LIST = 1,
-    /*
-     One element of a list.
-     */
-    HEGEL_LABEL_LIST_ELEMENT = 2,
-    /*
-     Outer span around a set (unordered, no duplicates).
-     */
-    HEGEL_LABEL_SET = 3,
-    /*
-     One element of a set.
-     */
-    HEGEL_LABEL_SET_ELEMENT = 4,
-    /*
-     Outer span around a map / dictionary.
-     */
-    HEGEL_LABEL_MAP = 5,
-    /*
-     One (key, value) entry of a map.
-     */
-    HEGEL_LABEL_MAP_ENTRY = 6,
-    /*
-     Outer span around a tuple / fixed-arity record.
-     */
-    HEGEL_LABEL_TUPLE = 7,
-    /*
-     Outer span around a `one_of` / disjunction; useful so the shrinker
-     can swap which branch is taken.
-     */
-    HEGEL_LABEL_ONE_OF = 8,
-    /*
-     Outer span around an `optional` (None vs Some(value)).
-     */
-    HEGEL_LABEL_OPTIONAL = 9,
-    /*
-     Outer span around a fixed-shape record (named fields known
-     statically).
-     */
-    HEGEL_LABEL_FIXED_DICT = 10,
-    /*
-     Outer span around a `flat_map` / monadic dependent draw.
-     */
-    HEGEL_LABEL_FLAT_MAP = 11,
-    /*
-     Outer span around a `filter` / rejection-sampling wrapper.
-     */
-    HEGEL_LABEL_FILTER = 12,
-    /*
-     Outer span around a `map` / pure transformation.
-     */
-    HEGEL_LABEL_MAPPED = 13,
-    /*
-     Outer span around a `sampled_from` / pick-from-collection draw.
-     */
-    HEGEL_LABEL_SAMPLED_FROM = 14,
-    /*
-     Outer span around the variant discriminator of a sum-type draw.
-     */
-    HEGEL_LABEL_ENUM_VARIANT = 15,
-    /*
-     Span around one swarm-testing feature-flag draw. Emitted internally
-     by the engine's state-machine rule selection
-     (`hegel_state_machine_next_rule`); callers normally never open this
-     span themselves.
-     */
-    HEGEL_LABEL_FEATURE_FLAG = 16,
-    /*
-     Span around one regex string draw. Emitted internally by
-     `hegel_generate_string`; callers normally never open this span
-     themselves. Likewise for the other engine-side compound draws below.
-     */
-    HEGEL_LABEL_REGEX = 17,
-    /*
-     Span around one email-address draw (`hegel_generate_string`).
-     */
-    HEGEL_LABEL_EMAIL = 18,
-    /*
-     Span around one URL draw (`hegel_generate_string`).
-     */
-    HEGEL_LABEL_URL = 19,
-    /*
-     Span around one domain-name draw (`hegel_generate_string`).
-     */
-    HEGEL_LABEL_DOMAIN = 20,
-    /*
-     Span around one date draw (`hegel_generate_date`).
-     */
-    HEGEL_LABEL_DATE = 21,
-    /*
-     Span around one time draw (`hegel_generate_time`).
-     */
-    HEGEL_LABEL_TIME = 22,
-    /*
-     Span around one datetime draw (`hegel_generate_datetime`).
-     */
-    HEGEL_LABEL_DATETIME = 23,
-    /*
-     Span around one UUID draw (`hegel_generate_uuid`).
-     */
-    HEGEL_LABEL_UUID = 24,
-    /*
-     Span around one IP-address draw (`hegel_generate_ipv4` /
-     `hegel_generate_ipv6`).
-     */
-    HEGEL_LABEL_IP_ADDRESS = 25,
-    /*
-     Span around one integer draw (`hegel_generate_integer` /
-     `hegel_generate_integer_big`). Emitted internally, like every
-     per-draw label: same-label spans are what the engine's mutation
-     machinery duplicates to propose repeated values.
-     */
-    HEGEL_LABEL_INTEGER = 26,
-    /*
-     Span around one float draw (`hegel_generate_float`).
-     */
-    HEGEL_LABEL_FLOAT = 27,
-    /*
-     Span around one boolean draw (`hegel_generate_boolean`).
-     */
-    HEGEL_LABEL_BOOLEAN = 28,
-    /*
-     Span around one bytes draw (`hegel_generate_bytes`).
-     */
-    HEGEL_LABEL_BYTES = 29,
-    /*
-     Span around one text string draw (`hegel_generate_string` with a
-     text generator).
-     */
-    HEGEL_LABEL_STRING = 30,
-    /*
-     Outer span around one stateful-testing rule invocation, grouping all
-     the draws a single rule makes so the shrinker can delete a whole step
-     at once. Opened by the frontend's state-machine driver.
-     */
-    HEGEL_LABEL_STATEFUL_RULE = 31,
-    /*
-     Span around one fresh-identifier draw (`hegel_pool_add`). Emitted
-     internally by the engine.
-     */
-    HEGEL_LABEL_FRESH_ID = 32,
-    /*
-     Span around one choose-from-set draw (`hegel_pool_generate`). Emitted
-     internally by the engine.
-     */
-    HEGEL_LABEL_SET_CHOICE = 33,
-} hegel_label_t;
-
-/*
- How the engine should treat the run: a full property-test loop or a
- single test case. Set via `hegel_settings_set_mode`.
- */
-typedef enum {
-    /*
-     libhegel drives a full generate / shrink / replay loop until the
-     test-case budget or the choice tree is exhausted. The default.
-     */
-    HEGEL_MODE_TEST_RUN = 0,
-    /*
-     libhegel produces exactly one test case and stops, with no shrinking.
-     Useful for replaying a stored counterexample or running an
-     exploratory probe.
-     */
-    HEGEL_MODE_SINGLE_TEST_CASE = 1,
-} hegel_mode_t;
-
-/*
- Which source of randomness the engine draws from. Set via
- `hegel_settings_set_backend`.
- */
-typedef enum {
-    /*
-     Choose automatically (the default): urandom when running inside
-     Antithesis, otherwise the default backend.
-     */
-    HEGEL_BACKEND_AUTO = 0,
-    /*
-     Expand a single seeded PRNG. Runs are reproducible from the seed and
-     shrinking / replay work as usual.
-     */
-    HEGEL_BACKEND_DEFAULT = 1,
-    /*
-     Read fresh entropy from `/dev/urandom` on every draw, falling back to
-     an OS-seeded PRNG on platforms without it. Intended for running under
-     Antithesis, whose fuzzer controls `/dev/urandom`; you almost
-     certainly don't want it otherwise.
-     */
-    HEGEL_BACKEND_URANDOM = 2,
-} hegel_backend_t;
-
-/*
- Verbosity of engine-emitted output (logs, per-case traces). Set via
- `hegel_settings_set_verbosity`.
- */
-typedef enum {
-    /*
-     Nothing besides the final result.
-     */
-    HEGEL_VERBOSITY_QUIET = 0,
-    /*
-     A short summary line per run. The default.
-     */
-    HEGEL_VERBOSITY_NORMAL = 1,
-    /*
-     Per-test-case progress and drawn values, plus panic diagnostics as
-     they happen.
-     */
-    HEGEL_VERBOSITY_VERBOSE = 2,
-    /*
-     As verbose, plus shrinker trace output.
-     */
-    HEGEL_VERBOSITY_DEBUG = 3,
-} hegel_verbosity_t;
 
 /*
  Outcome of a single test case. Passed to `hegel_mark_complete`.
@@ -551,6 +401,99 @@ typedef struct hegel_failure_t hegel_failure_t;
 typedef struct hegel_pool_t hegel_pool_t;
 
 /*
+ A pretty-printer document.
+
+ Built from three primitives: `hegel_printer_text` emits unbreakable text,
+ `hegel_printer_breakable` marks a point that renders as a separator if the
+ enclosing group fits on one line and as a newline plus indentation if it
+ does not, and `hegel_printer_begin_group` / `hegel_printer_end_group`
+ delimit the groups those decisions are made over. Breaking is
+ all-or-nothing per group, decided outermost groups first. The engine only
+ provides the layout machinery; what gets printed — and in which language's
+ syntax — is entirely the client's choice.
+
+ Two facilities support printing values *while generating them*:
+ `hegel_printer_deferred` opens a hole whose content is written later
+ (while the test body runs) and spliced in by `hegel_printer_resolve`, and
+ `hegel_printer_begin_speculative` buffers output that a rejected draw
+ (a filter retry, a failed assumption) can retract.
+
+ Create a standalone document with `hegel_printer_new`, or fetch a handle
+ onto a test-case handle's region of the family document with
+ `hegel_test_case_printer`.
+
+ # Ownership and concurrency
+
+ A printer handle addresses one *region* of a document — the document
+ body for a root handle, or a hole for a handle from
+ `hegel_printer_deferred`. Handles follow the test-case handles' model: a
+ handle may move between threads, but belongs to one thread at a time —
+ concurrent operations on the *same* handle return
+ `HEGEL_E_CONCURRENT_USE`. To print from several threads, give each
+ thread its own region: `hegel_printer_deferred` opens a hole at the
+ handle's current position, and content written into it from any thread,
+ on any schedule, renders at that anchor point — so concurrent output is
+ deterministic, and two handles never interleave within one region.
+
+ Every handle — including those returned by `hegel_printer_deferred` —
+ must be released with `hegel_printer_free`.
+ */
+typedef struct hegel_printer_t hegel_printer_t;
+
+/*
+ Options for constructing a pretty-printer document.
+
+ Construct with `hegel_printer_options_new`, configure via the
+ `hegel_printer_options_set_*` functions, pass to `hegel_printer_new` /
+ `hegel_test_case_printer`, and free with `hegel_printer_options_free`.
+ Every option has a default, and a NULL options pointer means "all
+ defaults", so callers that are happy with the defaults never construct
+ one. New options are added as new setters, never by changing existing
+ signatures.
+
+ An options handle only parameterizes construction: it is read during the
+ construction call and may be freed (or reconfigured and reused)
+ immediately afterwards.
+ */
+typedef struct hegel_printer_options_t hegel_printer_options_t;
+
+/*
+ Opaque handle to an engine-managed *recursive generation scope*: the
+ leaf budget and retry bookkeeping for one draw of a recursively defined
+ value (a tree, a document, ...).
+
+ Created by `hegel_new_recursion` on a test case, once per recursive
+ value drawn; driven by `hegel_recursion_branch` / `hegel_recursion_leaf`
+ / `hegel_recursion_retry` / `hegel_recursion_finish` through any handle
+ of the *same* test-case family (the root or any clone) — decisions are
+ drawn from whichever handle makes the call. Like a pool, the scope holds
+ an internal lock, so clone handles driven from parallel threads share
+ the leaf budget safely.
+
+ The protocol, for one sub-value (starting with the root at depth 0):
+ call `hegel_recursion_branch`; on `true` invoke the user's branch
+ function, drawing each of its sub-values at `depth + 1` with this same
+ protocol; on `false` call `hegel_recursion_leaf` and then draw one leaf.
+ When `hegel_recursion_leaf` returns `HEGEL_E_RETRY` the attempt has
+ outgrown the leaf budget: unwind out of the user's generators without
+ drawing anything further, call `hegel_recursion_retry`, and on `HEGEL_OK`
+ start the whole value again from the root. Once the root sub-value has
+ finished, call `hegel_recursion_finish`: `HEGEL_OK` accepts the value,
+ while `HEGEL_E_RETRY` means the engine discarded the attempt as
+ mispriced — drop the value and start again from the root (without
+ calling `hegel_recursion_retry`). All policy — the branch probabilities
+ and their adaptation to the branch arities actually produced, the depth
+ and leaf limits, and when to give up — lives in the engine, so recursive
+ values are identically distributed in every language frontend.
+
+ The handle is independent of the test case and run it was created under:
+ free it with `hegel_recursion_free` exactly once, at any point — before
+ or after the test case or run is freed, in any order relative to other
+ frees.
+ */
+typedef struct HegelRecursion HegelRecursion;
+
+/*
  In-flight property-test run.
 
  The caller starts a run, repeatedly asks for the next test case, reports
@@ -570,8 +513,8 @@ typedef struct hegel_run_t hegel_run_t;
 
  A failed run produced counterexamples to the property. An errored run
  produced no verdict on the property at all, so it has no failures to
- inspect. A run errors on a failed health check, a nondeterministic test,
- or a violated internal invariant of libhegel.
+ inspect. A run errors on a failed health check, a nondeterminism
+ mismatch, or a violated internal invariant of libhegel.
  */
 typedef struct hegel_run_result_t hegel_run_result_t;
 
@@ -580,21 +523,21 @@ typedef struct hegel_run_result_t hegel_run_result_t;
  and then freed. Settings can be reused across runs.
 
  A configured handle may be shared across threads, but do not call setters
- concurrently on the same handle.
+ concurrently on the same handle, or concurrently with
+ `hegel_settings_get_database` reads of it.
  */
 typedef struct hegel_settings_t hegel_settings_t;
 
 /*
  Opaque handle to an engine-owned *state machine* for stateful
- (rule-based) testing.
+ (rule-based) testing, sequential or concurrent.
 
  Created by `hegel_new_state_machine` on a test case; driven by
- `hegel_state_machine_next_rule` through any handle of the *same*
- test-case family (the root or any clone) — each rule choice is drawn
- from whichever handle makes the call. The machine holds an internal
- lock, so concurrent use from two clone handles serializes instead of
- erroring. (Which rule a concurrent draw picks then depends on scheduling
- order, with the usual replay caveat for racy tests.)
+ `hegel_state_machine_next_group` / `hegel_state_machine_next_rule` /
+ `hegel_state_machine_rule_rejected` through any handle of the *same*
+ test-case family (the root or any clone) — each choice is drawn from
+ whichever handle makes the call. The machine holds an internal lock, so
+ concurrent use from two clone handles serializes instead of erroring.
 
  The handle is independent of the test case and run it was created under:
  free it with `hegel_state_machine_free` exactly once, at any point —
@@ -678,13 +621,13 @@ typedef struct {
 
 /*
  A drawn time of day: `hour` in `[0, 23]`, `minute` and `second` in
- `[0, 59]`, `microsecond` in `[0, 999999]`.
+ `[0, 59]`, `nanosecond` in `[0, 999999999]`.
  */
 typedef struct {
     uint8_t hour;
     uint8_t minute;
     uint8_t second;
-    uint32_t microsecond;
+    uint32_t nanosecond;
 } hegel_time_t;
 
 /*
@@ -694,6 +637,21 @@ typedef struct {
     hegel_date_t date;
     hegel_time_t time;
 } hegel_datetime_t;
+
+/*
+ An engine-allocated string buffer returned by `hegel_printer_value`.
+
+ `data` points to `len` bytes of UTF-8. The buffer is **not**
+ NUL-terminated (printed values can contain any character), so always use
+ `len`. The caller owns the buffer and must release it with
+ `hegel_printer_value_result_free` (freeing through any other allocator is
+ undefined behaviour). `data` is never NULL after a successful call, even
+ for `len == 0`.
+ */
+typedef struct {
+    char *data;
+    size_t len;
+} hegel_printer_value_result_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -726,17 +684,62 @@ const char *hegel_context_last_error(const hegel_context_t *ctx);
 
 /*
  Parameters:
- `out_settings`: Receives a handle initialized with libhegel's
-   defaults: 100 test cases, all phases enabled, normal verbosity, no
-   seed, and the default disk database under `.hegel/`.
+ `out_settings`: Receives a handle initialized from the default settings
+   profile.
 
- Returns `HEGEL_OK`.
+ Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` when profile resolution
+ fails: a default-profile setting names an unknown profile, or a
+ `hegel.toml` is malformed. Read the message with
+ `hegel_context_last_error`.
 
- When a CI environment is detected (via `CI`, `GITHUB_ACTIONS`, and
- similar variables) the defaults change: the database is disabled and
- derandomization is enabled. Override either with the explicit setters.
+ A profile is a named settings delta. Two names are reserved: `base` is
+ the immutable base settings (100 test cases, all phases enabled, normal
+ verbosity, no seed, the disk database under `.hegel/`), and `default`
+ is the default profile, the one in effect when nothing names a profile:
+ the strongest set of `hegel_set_default_profile`, the
+ `HEGEL_DEFAULT_PROFILE` environment variable, and the top-level
+ `default = "<profile>"` entry in `hegel.toml`, else the detected
+ environment (`workload` inside Antithesis, detected via
+ `ANTITHESIS_OUTPUT_DIR`, or `ci` on a CI server, detected via `CI`,
+ `GITHUB_ACTIONS`, and similar variables), else `development`. This
+ function resolves `default`.
+
+ Three ordinary profiles ship with libhegel: `development` (the base
+ settings, unchanged — what local runs get), `ci` (derandomization on,
+ database disabled, the `too_slow` health check suppressed), and
+ `workload` (database disabled, every health check suppressed). A custom profile without an explicit `extends` extends
+ `default`, skipping any candidate already in its chain, so it sits on
+ `ci` when resolved on a CI server and on `development` locally. The
+ shipped profiles themselves extend `base` and never layer over one
+ another. Extending or selecting `base` pins the plain base settings.
+
+ Profiles are modified and defined in a `hegel.toml` found in the current
+ directory or the nearest ancestor, and registered programmatically with
+ `hegel_settings_register_profile`; use `hegel_settings_new_for_profile`
+ to resolve one by name.
  */
-hegel_result_t hegel_settings_new(hegel_context_t *ctx, hegel_settings_t **out_settings);
+hegel_result_t hegel_settings_new(hegel_context_t *ctx,
+                                  hegel_settings_t **out_settings);
+
+/*
+ Parameters:
+ `name`: The profile to resolve: reserved (`base`, `default`), shipped
+   (`development`, `ci`, `workload`), defined in `hegel.toml`, or
+   registered with `hegel_settings_register_profile`.
+ `out_settings`: Receives a handle initialized from that profile.
+
+ Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` when the profile is unknown
+ or a `hegel.toml` is malformed. Read the message with
+ `hegel_context_last_error`.
+
+ Selecting a profile by name does not change what the default profile is:
+ the named profile still implicitly extends `default` (see
+ `hegel_settings_new`), so it layers over the environment's profile —
+ except `base`, which is always the plain base settings.
+ */
+hegel_result_t hegel_settings_new_for_profile(hegel_context_t *ctx,
+                                              const char *name,
+                                              hegel_settings_t **out_settings);
 
 /*
  Parameters:
@@ -748,25 +751,13 @@ hegel_result_t hegel_settings_free(hegel_context_t *ctx, hegel_settings_t *s);
 
 /*
  Parameters:
- `mode`: A full run loop or a single test case with no shrinking. See
-   `hegel_mode_t`.
-
- Returns `HEGEL_OK`.
-
- The enum-valued setters take `uint32_t` rather than the enum type so
- that an out-of-range value is an error instead of undefined behavior.
- */
-hegel_result_t hegel_settings_set_mode(hegel_context_t *ctx, hegel_settings_t *s, uint32_t mode);
-
-/*
- Parameters:
  `backend`: A `hegel_backend_t` value selecting the source of
    randomness.
 
  Returns `HEGEL_OK`.
 
- Once an explicit backend has been set on a handle there is no way to
- change it within a run.
+ The enum-valued setters take `uint32_t` rather than the enum type so
+ that an out-of-range value is an error instead of undefined behavior.
  */
 hegel_result_t hegel_settings_set_backend(hegel_context_t *ctx,
                                           hegel_settings_t *s,
@@ -781,18 +772,6 @@ hegel_result_t hegel_settings_set_backend(hegel_context_t *ctx,
  Returns `HEGEL_OK`.
  */
 hegel_result_t hegel_settings_set_test_cases(hegel_context_t *ctx, hegel_settings_t *s, uint64_t n);
-
-/*
- Parameters:
- `n`: Target number of steps to run per stateful test case. Each stateful
-   case runs at least one step and at most `n`. The default is 50. `n`
-   must be at least 1.
-
- Returns `HEGEL_OK`.
- */
-hegel_result_t hegel_settings_set_stateful_step_count(hegel_context_t *ctx,
-                                                      hegel_settings_t *s,
-                                                      int64_t n);
 
 /*
  Parameters:
@@ -845,10 +824,44 @@ hegel_result_t hegel_settings_set_report_multiple_failures(hegel_context_t *ctx,
 
 /*
  Parameters:
- `database`: NULL sets it to the default: `./.hegel/examples/`. `""`
-   disables the database entirely. Discovered failures will not be
-   stored. Anything else is used as the database root directory. The
-   directory will be created if it does not already exist.
+ `yes`: When `true`, libhegel prints a statistics block on the run's
+   output at the end of the run: for each label recorded with
+   `hegel_event`, the fraction of generation-phase test cases it
+   occurred in, and for each label recorded with `hegel_event_value`, a
+   distribution summary of the observed values. Defaults to off.
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_set_show_statistics(hegel_context_t *ctx,
+                                                  hegel_settings_t *s,
+                                                  bool yes);
+
+/*
+ Parameters:
+ `yes`: When `true`, a test case may make any number of choices (draws,
+   spans, collection and clone steps). By default a test case is
+   concluded as an overrun once it has made 2^20 choices: the draw that
+   would exceed the limit returns `HEGEL_E_STOP_TEST`, and the frontend
+   reports the case with `HEGEL_STATUS_OVERRUN`. Suppressing the
+   `TestCasesTooLarge` health check (see
+   `hegel_settings_set_suppress_health_check`) removes the limit too. A
+   long-running test case — a concurrent state machine driven for hours,
+   say — needs it removed; the cost is the memory to record every choice
+   it makes.
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_set_unbounded_choices(hegel_context_t *ctx,
+                                                    hegel_settings_t *s,
+                                                    bool yes);
+
+/*
+ Parameters:
+ `database`: NULL sets it to the default: `./.hegel/examples/`, including
+   resetting a value the handle already carries. `""` disables the
+   database entirely. Discovered failures will not be stored. Anything
+   else is used as the database root directory. The directory will be
+   created if it does not already exist.
 
  Returns `HEGEL_OK`.
  */
@@ -866,6 +879,36 @@ hegel_result_t hegel_settings_set_database(hegel_context_t *ctx,
 hegel_result_t hegel_settings_set_database_key(hegel_context_t *ctx,
                                                hegel_settings_t *s,
                                                const char *key);
+
+/*
+ Parameters:
+ `file`: The source file the test is defined in.
+ `begin_line`: The line in `file` where the test's definition begins.
+ `class_name`: The class, module or package enclosing the test function.
+ `function`: The name of the test function.
+
+ Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` if any string is NULL or
+ not valid UTF-8.
+
+ Records where the test under these settings lives. Inside
+ [Antithesis](https://antithesis.com/) (detected via
+ `ANTITHESIS_OUTPUT_DIR`), libhegel then reports the verdict of every run
+ started from these settings, and of every test case replayed from a blob
+ with them, as one `always` assertion in the SDK format Antithesis
+ collects — identified as `<class_name>::<function> passes properties` and
+ located at `file:begin_line` — so the property is listed alongside the
+ assertions in the system under test and flagged when it fails. Outside
+ Antithesis the location is unused. Without a location nothing is
+ reported. Like the database key, the location is per-test identity rather
+ than a setting: `hegel_settings_register_profile` does not snapshot it.
+ Each call replaces the previous location.
+ */
+hegel_result_t hegel_settings_set_test_location(hegel_context_t *ctx,
+                                                hegel_settings_t *s,
+                                                const char *file,
+                                                uint32_t begin_line,
+                                                const char *class_name,
+                                                const char *function);
 
 /*
  Parameters:
@@ -888,6 +931,194 @@ hegel_result_t hegel_settings_set_phases(hegel_context_t *ctx,
 hegel_result_t hegel_settings_set_suppress_health_check(hegel_context_t *ctx,
                                                         hegel_settings_t *s,
                                                         uint32_t checks);
+
+/*
+ Parameters:
+ `yes`: When `true`, a failure should be reported with a copy-pasteable
+   reproduction line for its counterexample. Defaults to `true`. libhegel
+   itself never acts on this
+   value — the reproduce blob is always attached to the failure and
+   printing it is the caller's decision — but carrying it in the settings
+   lets profiles configure it for every Hegel library.
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_set_print_blob(hegel_context_t *ctx, hegel_settings_t *s, bool yes);
+
+/*
+ Parameters:
+ `name`: The profile name to register: ASCII letters, digits, `-` and
+   `_` only. The reserved names `base` and `default` are rejected.
+ `settings`: The settings to snapshot. The caller keeps ownership; the
+   handle's database key is not part of the snapshot.
+
+ Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` for an invalid or reserved
+ name.
+
+ Registers a complete snapshot of `settings` as the profile `name`,
+ process-wide, replacing any earlier registration of the same name.
+ Registering a shipped name replaces that profile wholesale. A
+ `hegel.toml` section for `name` still merges over the snapshot, and may
+ not set `extends` on it. Registration is not retroactive: settings
+ handles already created keep their values.
+ */
+hegel_result_t hegel_settings_register_profile(hegel_context_t *ctx,
+                                               const char *name,
+                                               const hegel_settings_t *settings);
+
+/*
+ Parameters:
+ `name`: The profile the `default` alias should resolve to, or NULL to
+   clear an earlier call. The name is not required to exist yet; naming
+   the `default` alias itself is rejected.
+
+ Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` for an invalid name.
+
+ Sets the default settings profile for the whole process, taking
+ precedence over `HEGEL_DEFAULT_PROFILE`, the `default` entry in
+ `hegel.toml`, and environment detection (see `hegel_settings_new`). Like
+ registration it is not retroactive: settings handles already created
+ keep their values.
+ */
+hegel_result_t hegel_set_default_profile(hegel_context_t *ctx, const char *name);
+
+/*
+ Parameters:
+ `out`: Receives the configured number of test cases.
+
+ Returns `HEGEL_OK`.
+
+ The `hegel_settings_get_*` functions read a settings handle back — for
+ example one resolved from a profile by `hegel_settings_new` — so a
+ Hegel library can present the effective configuration. Each takes a
+ `const` handle and one out parameter, and fails with
+ `HEGEL_E_INVALID_HANDLE` / `HEGEL_E_INVALID_ARG` on a null handle or out
+ pointer.
+ */
+hegel_result_t hegel_settings_get_test_cases(hegel_context_t *ctx,
+                                             const hegel_settings_t *s,
+                                             uint64_t *out);
+
+/*
+ Parameters:
+ `out`: Receives the configured verbosity.
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_get_verbosity(hegel_context_t *ctx,
+                                            const hegel_settings_t *s,
+                                            hegel_verbosity_t *out);
+
+/*
+ Parameters:
+ `out_seed`: Receives the configured seed when one is set, else 0.
+ `out_has_seed`: Receives whether a seed is set.
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_get_seed(hegel_context_t *ctx,
+                                       const hegel_settings_t *s,
+                                       uint64_t *out_seed,
+                                       bool *out_has_seed);
+
+/*
+ Parameters:
+ `out`: Receives whether derandomization is enabled.
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_get_derandomize(hegel_context_t *ctx,
+                                              const hegel_settings_t *s,
+                                              bool *out);
+
+/*
+ Parameters:
+ `out_database`: Receives the database value, mirroring the setter's
+   convention: NULL for the default, `""` for disabled, else the root
+   directory path. The pointer borrows the handle and stays valid until
+   the next `hegel_settings_set_database` call on it or
+   `hegel_settings_free`.
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_get_database(hegel_context_t *ctx,
+                                           const hegel_settings_t *s,
+                                           const char **out_database);
+
+/*
+ Parameters:
+ `out`: Receives the enabled phases as a bitwise OR of `hegel_phase_t`
+   values.
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_get_phases(hegel_context_t *ctx,
+                                         const hegel_settings_t *s,
+                                         uint32_t *out);
+
+/*
+ Parameters:
+ `out`: Receives the suppressed health checks as a bitwise OR of
+   `hegel_health_check_t` values, as resolved from the profile and any
+   `hegel_settings_set_suppress_health_check` call.
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_get_suppress_health_check(hegel_context_t *ctx,
+                                                        const hegel_settings_t *s,
+                                                        uint32_t *out);
+
+/*
+ Parameters:
+ `out`: Receives whether multi-bug reporting is enabled.
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_get_report_multiple_failures(hegel_context_t *ctx,
+                                                           const hegel_settings_t *s,
+                                                           bool *out);
+
+/*
+ Parameters:
+ `out`: Receives whether the statistics block is enabled.
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_get_show_statistics(hegel_context_t *ctx,
+                                                  const hegel_settings_t *s,
+                                                  bool *out);
+
+/*
+ Parameters:
+ `out`: Receives whether test cases may make any number of choices (see
+   `hegel_settings_set_unbounded_choices`).
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_get_unbounded_choices(hegel_context_t *ctx,
+                                                    const hegel_settings_t *s,
+                                                    bool *out);
+
+/*
+ Parameters:
+ `out`: Receives whether reproduction lines should be printed. See
+   `hegel_settings_set_print_blob`.
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_get_print_blob(hegel_context_t *ctx,
+                                             const hegel_settings_t *s,
+                                             bool *out);
+
+/*
+ Parameters:
+ `out`: Receives the configured backend.
+
+ Returns `HEGEL_OK`.
+ */
+hegel_result_t hegel_settings_get_backend(hegel_context_t *ctx,
+                                          const hegel_settings_t *s,
+                                          hegel_backend_t *out);
 
 /*
  Parameters:
@@ -1015,6 +1246,14 @@ hegel_result_t hegel_test_case_from_blob(hegel_context_t *ctx,
 hegel_result_t hegel_test_case_free(hegel_context_t *ctx, hegel_test_case_t *tc);
 
 /*
+ Returns whether this test case belongs to a run already known to be
+ nondeterministic.
+ */
+hegel_result_t hegel_test_case_is_nondeterministic(hegel_context_t *ctx,
+                                                   const hegel_test_case_t *tc,
+                                                   bool *out_is_nondeterministic);
+
+/*
  Parameters:
  `out_test_case`: Receives a new handle onto an independent stream of
    the same test case.
@@ -1036,14 +1275,82 @@ hegel_result_t hegel_test_case_clone(hegel_context_t *ctx,
                                      hegel_test_case_t **out_test_case);
 
 /*
+ Parameters:
+ `indent`: How many columns further than `tc`'s own lines every line of
+   the block is indented.
+ `out_test_case`: Receives a new handle onto the *same* choice stream as
+   `tc`.
+
+ Returns `HEGEL_OK`, `HEGEL_E_INVALID_HANDLE` for a NULL `tc`, and
+ `HEGEL_E_INVALID_ARG` for a NULL `out_test_case`.
+
+ A block handle is how a client prints an indented section under a
+ heading — the body of a stateful rule under its `Step 3: add {` line, the
+ body of a repeated section — without touching every line itself. Its
+ print region (see `hegel_test_case_printer`) is a block nested in `tc`'s
+ region at the current position: everything printed or noted through the
+ handle, and through the clones and blocks derived from it, lands there,
+ each line indented `indent` columns further than `tc`'s lines (blocks
+ nest, and their indentation adds up). The indentation is applied to a
+ line when it gets its first content, so it covers the continuation lines
+ of a value broken across lines too, and it ends exactly with the block:
+ a line `tc` writes after the block's last one is back at `tc`'s
+ indentation. It is independent of the break-point indentation
+ `hegel_printer_begin_group` / `hegel_printer_shift_indent` manage.
+
+ Unlike a clone, a block handle draws from `tc`'s own choice sequence:
+ drawing through it and through `tc` are the same thing, so the two must
+ not be driven concurrently (give a thread a clone instead). It shares
+ everything else with `tc` — outcome, budgets, worker attribution as of
+ its creation — and is released with `hegel_test_case_free` like any
+ other handle. If `tc`'s region is dead (the document was read), the
+ block shares the dead region and its prints are no-ops.
+ */
+hegel_result_t hegel_test_case_block(hegel_context_t *ctx,
+                                     const hegel_test_case_t *tc,
+                                     uint64_t indent,
+                                     hegel_test_case_t **out_test_case);
+
+/*
+ Attribute this handle's output to concurrent worker `worker_index`:
+ every line recorded from now on through the handle — `hegel_note` lines,
+ and lines started through a printer fetched from it with
+ `hegel_test_case_printer`, before or after this call — is prefixed with
+ `[worker N +X.XXXms] `, where `X.XXX` is the time since the test case
+ started at which the line was recorded. Blocks and clones derived from
+ the handle after this call inherit the attribution (a worker's rule
+ bodies and their clones print as that worker's), and may be attributed
+ afresh on their own. Lines a group breaks across are stamped on their
+ first line only.
+
+ This is the attribution a concurrent stateful runner gives the clone it
+ hands each worker thread (see `hegel_state_machine_next_rule`), so the
+ report can be read across workers: regions order a worker's lines
+ together, and the offsets say how they interleaved in time.
+
+ Returns `HEGEL_OK`, `HEGEL_E_INVALID_HANDLE` for a NULL `tc`, and
+ `HEGEL_E_INVALID_ARG` for a negative `worker_index`.
+ */
+hegel_result_t hegel_test_case_set_worker(hegel_context_t *ctx,
+                                          const hegel_test_case_t *tc,
+                                          int64_t worker_index);
+
+/*
  A span groups a set of draws so the shrinker can treat them as a unit.
  Libraries should wrap each compound generator in a span.
 
  Parameters:
- `label`: Identifies what kind of structure this span groups. The
-   values reserved by libhegel are the `hegel_label_t` constants in
-   `hegel.h`. Libraries may use any stable `u64` to define their own
-   spans.
+ `label`: Identifies the generator that opened the span. Labels have no
+   meaning beyond identity: libhegel treats two spans with the same label
+   as coming from the same generator, and so as candidates for swapping,
+   duplicating and reordering with each other, and does nothing else with
+   them. Any value is valid as long as the same generator always uses the
+   same label; derive labels with `hegel_label_from_name` and
+   `hegel_label_combine` (or the same hashes computed ahead of time)
+   rather than numbering them by hand, so that generators with the same
+   shape but different components — a list of integers and a list of
+   strings, say — get different labels. libhegel opens spans around its
+   own draws with labels derived from names of the form `hegel.<kind>`.
 
  Returns `HEGEL_OK`.
 
@@ -1062,6 +1369,46 @@ hegel_result_t hegel_start_span(hegel_context_t *ctx, hegel_test_case_t *tc, uin
  Closes the most recently opened span.
  */
 hegel_result_t hegel_stop_span(hegel_context_t *ctx, hegel_test_case_t *tc, bool discard);
+
+/*
+ The span label for a generator identified by a name: the 64-bit FNV-1a
+ hash of the name's bytes. Use it for the label of a generator with no
+ component generators (`hegel_label_from_name("mylib.integers")`), and
+ for the first argument of `hegel_label_combine` for one that has
+ components. A name only has to be stable and unique to its generator; a
+ prefix naming the library keeps it clear of libhegel's own `hegel.<kind>`
+ names and of other libraries'.
+
+ Parameters:
+ `name`: Non-NULL, NUL-terminated. Hashed as bytes, so any encoding
+   works as long as the generator always uses the same one.
+ `out_label`: Receives the label.
+
+ Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` on a NULL `name` or
+ `out_label`.
+ */
+hegel_result_t hegel_label_from_name(hegel_context_t *ctx, const char *name, uint64_t *out_label);
+
+/*
+ The span label for a generator built from other generators: a hash of
+ the given labels, in order. Pass the generator's own label (from
+ `hegel_label_from_name`) first and its components' labels after it, so
+ that `lists(integers())` and `lists(text())` get different labels while
+ every `lists(integers())` gets the same one. Combining is
+ order-sensitive, and combining a single label does not return it
+ unchanged.
+
+ Parameters:
+ `labels`: `len` labels. May be NULL when `len` is 0.
+ `out_label`: Receives the combined label.
+
+ Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` on a NULL `labels` with a
+ non-zero `len` or a NULL `out_label`.
+ */
+hegel_result_t hegel_label_combine(hegel_context_t *ctx,
+                                   const uint64_t *labels,
+                                   size_t len,
+                                   uint64_t *out_label);
 
 /*
  For variable-length values, libhegel decides how many elements to
@@ -1120,6 +1467,102 @@ hegel_result_t hegel_collection_reject(hegel_context_t *ctx,
  freed exactly once; freeing the same handle twice is undefined behaviour.
  */
 hegel_result_t hegel_collection_free(hegel_context_t *ctx, hegel_collection_t *collection);
+
+/*
+ Open a recursive generation scope: libhegel decides where the value
+ branches, where it bottoms out in leaves, and when an attempt has grown
+ too large and must be retried. See `hegel_recursion_t` for the protocol.
+ Draws the scope's target size from `tc`'s stream (when `max_leaves` is
+ at least 2), so it must be called at the point in the draw sequence
+ where the recursive value begins.
+
+ Parameters:
+ `max_depth`: Branches nest at most this deep; sub-values at this depth
+   are always leaves, so 0 generates only leaves.
+ `max_leaves`: The most leaves one generated value may contain. Each
+   value steers toward a target size drawn from this range. Attempts
+   that outgrow the budget are discarded and retried steering toward a
+   smaller target, and the test case is rejected as invalid when several
+   attempts in a row fail to fit.
+ `out_recursion`: Receives a caller-owned handle to pass to the calls
+   below (through any handle of the same test-case family). Release it
+   with `hegel_recursion_free` exactly once.
+
+ Returns `HEGEL_OK` or `HEGEL_E_STOP_TEST`.
+ */
+hegel_result_t hegel_new_recursion(hegel_context_t *ctx,
+                                   hegel_test_case_t *tc,
+                                   uint64_t max_depth,
+                                   uint64_t max_leaves,
+                                   HegelRecursion **out_recursion);
+
+/*
+ Parameters:
+ `depth`: The nesting depth of the sub-value about to be drawn: 0 for the
+   root, and one more than the enclosing branch for its sub-values.
+ `out_branch`: Receives the leaf-or-branch decision, drawn from `tc`'s
+   stream: `true` means invoke the branch function, `false` means the
+   sub-value is a leaf (call `hegel_recursion_leaf`, then draw it).
+
+ Returns `HEGEL_OK` or `HEGEL_E_STOP_TEST`.
+ */
+hegel_result_t hegel_recursion_branch(hegel_context_t *ctx,
+                                      hegel_test_case_t *tc,
+                                      HegelRecursion *recursion,
+                                      uint64_t depth,
+                                      bool *out_branch);
+
+/*
+ Count one leaf against the current attempt's budget. Call immediately
+ before drawing each leaf value.
+
+ Returns `HEGEL_OK` (draw the leaf), `HEGEL_E_RETRY` (the attempt has
+ outgrown `max_leaves`: unwind it without drawing anything further and
+ call `hegel_recursion_retry`), or `HEGEL_E_STOP_TEST`.
+ */
+hegel_result_t hegel_recursion_leaf(hegel_context_t *ctx,
+                                    hegel_test_case_t *tc,
+                                    HegelRecursion *recursion);
+
+/*
+ Discard a generation attempt that returned `HEGEL_E_RETRY`: the spans it
+ left open are closed and marked discarded, its leaf budget is reset, and
+ the next attempt uses a lower branching probability. Call only after
+ unwinding out of the user's generators, from the stack depth at which
+ `hegel_new_recursion` was called.
+
+ Returns `HEGEL_OK` (start the value again from the root),
+ `HEGEL_E_ASSUME` (attempts exhausted: the test case has been concluded
+ invalid, abort the body as for any failed assumption), or
+ `HEGEL_E_STOP_TEST`.
+ */
+hegel_result_t hegel_recursion_retry(hegel_context_t *ctx,
+                                     hegel_test_case_t *tc,
+                                     HegelRecursion *recursion);
+
+/*
+ Report that the recursive value has finished generating: its root
+ sub-value (and therefore the whole tree) is complete. The engine checks
+ the branch pricing the attempt started from against the branch arities
+ it actually produced.
+
+ Returns `HEGEL_OK` (the value is accepted — use it),
+ `HEGEL_E_RETRY` (the attempt was mispriced and has been discarded, its
+ spans closed as discarded: drop the value and start again from the
+ root, *without* calling `hegel_recursion_retry`), or
+ `HEGEL_E_STOP_TEST`.
+ */
+hegel_result_t hegel_recursion_finish(hegel_context_t *ctx,
+                                      hegel_test_case_t *tc,
+                                      HegelRecursion *recursion);
+
+/*
+ Release a recursion handle from `hegel_new_recursion`. Safe to call with
+ NULL (a no-op that returns `HEGEL_OK`), and safe at any point in any
+ order relative to freeing the test case or the run. Each handle must be
+ freed exactly once; freeing the same handle twice is undefined behaviour.
+ */
+hegel_result_t hegel_recursion_free(hegel_context_t *ctx, HegelRecursion *recursion);
 
 /*
  A pool tracks a set of variable ids libhegel can draw from and shrink
@@ -1183,57 +1626,232 @@ hegel_result_t hegel_pool_generate(hegel_context_t *ctx,
 hegel_result_t hegel_pool_free(hegel_context_t *ctx, hegel_pool_t *pool);
 
 /*
- For stateful testing libhegel picks which rule runs next and the caller
- runs it. Each test case enables a random subset of rules and selection
- draws only from that subset.
+ Register a *state machine* for engine-owned stateful (rule-based)
+ testing, sequential or concurrent: `num_rules` rules — each assigned to
+ a concurrency group by `rule_groups`, an array of group ids parallel to
+ `rule_names`, and given a selection weight by `rule_weights`, an array
+ of `num_rules` finite, strictly positive doubles parallel to
+ `rule_names` (NULL for all-equal weights) — and `num_invariants`
+ invariants, with names as
+ NUL-terminated UTF-8, plus concurrency bounds. `invariant_always_check`
+ is an array of `num_invariants` flags parallel to `invariant_names`
+ (NULL for all-false): `hegel_state_machine_should_check_invariant`
+ answers true unconditionally for a flagged invariant and samples the
+ rest. Group ids are arbitrary
+ (any value except `HEGEL_STATE_MACHINE_DONE`, which
+ `hegel_state_machine_next_group` reserves as its termination sentinel):
+ the machine has one concurrency group per distinct value of
+ `rule_groups`. The engine draws the machine's concurrency
+ level — the number of workers (typically worker threads) that will pull
+ rules — in `[min_concurrency, max_concurrency]` and writes it into
+ `*out_concurrency`; the caller must run exactly that many workers. The
+ engine owns the distribution, which is weighted toward
+ `max_concurrency` (concurrency bugs need concurrency) rather than
+ shrink-biased toward the minimum. Pass `min_concurrency ==
+ max_concurrency` to fix the level without consuming entropy — `1, 1`
+ for a sequential machine. `step_count` is the target number of counted
+ rounds the machine runs per test case: every case runs at least one
+ round and at most `step_count` (at concurrency 1, where a round is one
+ rule, that is at most `step_count` completed rules), and each sampled
+ invariant is checked with probability `1 / step_count` per join point.
+ The engine has no default; frontends typically use 50.
 
- Parameters:
- `rule_names` / `num_rules`: NUL-terminated UTF-8 names, one per rule.
-   Must be non-empty.
- `invariant_names` / `num_invariants`: NUL-terminated UTF-8 names, one
-   per invariant.
- `out_state_machine`: Receives a caller-owned handle to pass to
-   `hegel_state_machine_next_rule` (through any handle of the same
-   test-case family). Release it with `hegel_state_machine_free` exactly
-   once.
+ The engine owns rule selection — including swarm testing, where each
+ worker enables a random subset of rules (at least one per group) and
+ selection draws only from that subset, with probability proportional
+ to `rule_weights` among the enabled rules of the current group. A
+ rule's realized frequency therefore depends on which other rules its
+ worker has enabled: the weights are a guide, not a guarantee. The
+ caller drives execution in
+ rounds: on the root test-case handle it asks
+ `hegel_state_machine_next_group` whether another round should run, then
+ each worker asks `hegel_state_machine_next_rule` which rule to run and
+ applies it, until that call signals the join point. Rules in
+ the same group may run concurrently; rules in different groups never
+ overlap.
 
- Returns `HEGEL_OK` or `HEGEL_E_STOP_TEST`.
+ Creating the machine draws from the calling handle's stream: the
+ concurrency level and each worker's swarm parameters are decided here,
+ up front, so the machine is fully constructed before any rule is
+ requested.
+
+ Creating a machine with `max_concurrency > 1` declares the run
+ nondeterministic: thread scheduling is outside the engine's control, so
+ nothing that assumes deterministic replay can be trusted. On a run not
+ already known to be nondeterministic, the first such creation is
+ rejected with `HEGEL_E_ASSUME` — the caller should abandon the body and
+ report the case `HEGEL_STATUS_INVALID`, exactly as for a failed
+ assumption — and the engine flips the run at that case's end. Every
+ later test case is marked nondeterministic before it starts (so a
+ frontend can capture its whole trace for the failure report, including
+ draws made before the machine is created) and its creations succeed.
+ From the flip on, the run reports failures faithfully from the
+ discovering execution and skips data-tree recording (and with it
+ novel-prefix generation and the nondeterminism mismatch check), span
+ mutation, the verify and shrink pass (and with it the flakiness check —
+ generation stops at the first bug, so at most one failure is reported),
+ targeting, and database persistence and reuse. Failures from such a run
+ carry no reproduce blob. A notice explaining this is printed once, on
+ the run's output, unless verbosity is quiet. This applies even to test
+ cases whose drawn concurrency level is 1: the declared bound is what
+ counts. Standalone test cases — `hegel_test_case_from_blob` replays —
+ are never rejected.
+
+ On success writes a caller-owned handle into `*out_state_machine` —
+ pass it to subsequent `hegel_state_machine_next_group` /
+ `hegel_state_machine_next_rule` / `hegel_state_machine_rule_rejected`
+ calls (through any handle of the same test-case family) and release it
+ with `hegel_state_machine_free` exactly once — writes the drawn
+ concurrency level into `*out_concurrency`, and returns `HEGEL_OK`.
+ Returns `HEGEL_E_ASSUME` for the run's first `max_concurrency > 1`
+ creation (the caller should abort the body and call
+ `hegel_mark_complete` with `HEGEL_STATUS_INVALID`; see above). Returns
+ `HEGEL_E_STOP_TEST` when the engine's choice budget is
+ exhausted (the caller should abort the body and call
+ `hegel_mark_complete` with `HEGEL_STATUS_OVERRUN`). Returns
+ `HEGEL_E_INVALID_ARG` if `num_rules` is zero, an entry of `rule_groups`
+ is `HEGEL_STATE_MACHINE_DONE`, an entry of `rule_weights` is not finite
+ and positive, `min_concurrency < 1`, `max_concurrency < min_concurrency`,
+ `step_count < 1`, or on null / non-UTF-8 names.
  */
 hegel_result_t hegel_new_state_machine(hegel_context_t *ctx,
                                        hegel_test_case_t *tc,
                                        const char *const *rule_names,
+                                       const int64_t *rule_groups,
+                                       const double *rule_weights,
                                        size_t num_rules,
                                        const char *const *invariant_names,
+                                       const bool *invariant_always_check,
                                        size_t num_invariants,
-                                       hegel_state_machine_t **out_state_machine);
+                                       int64_t min_concurrency,
+                                       int64_t max_concurrency,
+                                       int64_t step_count,
+                                       hegel_state_machine_t **out_state_machine,
+                                       int64_t *out_concurrency);
 
 /*
- Parameters:
- `out_rule_index`: Receives the index of the next rule to run, in
-   `[0, num_rules)`. `HEGEL_STATE_MACHINE_DONE` (`-1`) means libhegel's
-   step budget for this test case is exhausted, so stop running rules.
+ Start the machine's next round: make the per-round stop decision (a
+ recorded boolean draw with a small stop probability, bounded by the
+ machine's `step_count`) and, if the test case continues, draw
+ which concurrency group is current for the round. Writes the current
+ group's id (its value in the creating `rule_groups`) into
+ `*out_group_id` when a new round has begun and the workers should pull
+ rules again — the id identifies the round's group, e.g. for trace
+ output — or `HEGEL_STATE_MACHINE_DONE` (`INT64_MIN`) to indicate
+ termination of the whole state machine. (`hegel_new_state_machine`
+ rejects `HEGEL_STATE_MACHINE_DONE` as a group id so it stays
+ unambiguous here.)
 
- Returns `HEGEL_OK`, or `HEGEL_E_STOP_TEST` when libhegel's choice budget
- is exhausted.
+ Call this on the root test-case handle (the handle used for
+ hegel_new_state_machine) at every join point — after each worker's
+ `hegel_state_machine_next_rule` stream is exhausted — including before the
+ first rule is requested. This applies to sequential machines too: the
+ frontend must advance the group when the rule stream is exhausted, even
+ though there is only a single group.
+
+ `state_machine` must be a handle returned by `hegel_new_state_machine`
+ on this test-case family. Returns `HEGEL_E_STOP_TEST` when the
+ engine's choice budget is exhausted (the caller should abort the body
+ and call `hegel_mark_complete` with `HEGEL_STATUS_OVERRUN`).
+ */
+hegel_result_t hegel_state_machine_next_group(hegel_context_t *ctx,
+                                              hegel_test_case_t *tc,
+                                              hegel_state_machine_t *state_machine,
+                                              int64_t *out_group_id);
+
+/*
+ Draw the index of the next rule for worker `worker_index` to run this
+ round, letting the engine choose the rule sequence. The returned index
+ is always a rule belonging to the current concurrency group (see
+ `hegel_state_machine_next_group`). Swarm testing is applied per worker:
+ a random subset of rules is enabled (at least one per group) on the
+ worker's first selection and selection is restricted to that subset for
+ the rest of the test case.
+
+ `tc` may be any handle of the machine's test-case family: the machine's
+ state is family-wide, and the handle only determines which choice
+ stream the selection draws land in. At concurrency 1, it's safe to use
+ the root handle for everything. At concurrency > 1, each worker should
+ draw from its own `hegel_test_case_clone` handle (a single handle may
+ be driven by at most one thread at a time), cloned once before the
+ first round and kept for the whole test case, while the root handle
+ stays with whoever drives `hegel_state_machine_next_group`.
+
+ `worker_index` identifies the calling worker and must satisfy
+ `0 <= worker_index < concurrency` (the level drawn at state-machine
+ creation and written to `*out_concurrency`);
+ an index rather than the handle identifies the worker because a single
+ OS thread could hold multiple test-case clones. Draws consult only
+ per-worker and per-clone state, so draws on one worker don't affect
+ draws on another.
+
+ Writes `HEGEL_STATE_MACHINE_DONE` (`INT64_MIN`) into `*out_rule_index`
+ when the worker's round budget is exhausted: stop running rules and wait
+ for the next group / join point.
+
+ `state_machine` must be a handle returned by `hegel_new_state_machine`
+ on this test-case family. Returns `HEGEL_E_STOP_TEST` when the engine's
+ choice budget is exhausted (the caller should abort the body and call
+ `hegel_mark_complete` with `HEGEL_STATUS_OVERRUN`).
  */
 hegel_result_t hegel_state_machine_next_rule(hegel_context_t *ctx,
                                              hegel_test_case_t *tc,
                                              hegel_state_machine_t *state_machine,
+                                             int64_t worker_index,
                                              int64_t *out_rule_index);
 
 /*
  Report that the rule most recently returned by
- `hegel_state_machine_next_rule` was rejected: an assumption failed
- before the rule completed, so it should not count toward libhegel's
- step budget for the test case.
+ `hegel_state_machine_next_rule` to worker `worker_index` was rejected:
+ an assumption failed before the rule completed, so it should not count
+ toward libhegel's budget for the test case. At concurrency 1 the
+ current round then does not count toward the step budget; at
+ concurrency > 1 the rule does not advance the worker's per-round
+ continue/stop decision, so the worker's next
+ `hegel_state_machine_next_rule` call retries the slot.
 
- Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` when the state machine has
- no outstanding rule — no rule has been returned yet, or the current rule
- was already reported as rejected.
+ `worker_index` must satisfy `0 <= worker_index < concurrency`, exactly
+ as for `hegel_state_machine_next_rule`.
+
+ Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` when the worker has no
+ outstanding rule — no rule has been returned to it this round, its
+ current rule was already reported as rejected, or it has already pulled
+ another rule.
  */
 hegel_result_t hegel_state_machine_rule_rejected(hegel_context_t *ctx,
                                                  hegel_test_case_t *tc,
-                                                 hegel_state_machine_t *state_machine);
+                                                 hegel_state_machine_t *state_machine,
+                                                 int64_t worker_index);
+
+/*
+ Decide whether the caller should run invariant `invariant_index` at the
+ current join point, writing the decision into `*out_should_check`: true
+ unconditionally (consuming no entropy) for an invariant whose
+ `invariant_always_check` flag was set at creation, otherwise a
+ recorded boolean draw that is true with probability `1 / step_count`
+ (the machine's creation-time step count), so each sampled invariant's
+ expected number of sampled runs over a full-length test case is one,
+ regardless of the step count. The caller owns the machine's guaranteed invariant checks —
+ its initial state, and its final state once
+ `hegel_state_machine_next_group` signals termination — and should run
+ those unconditionally, without calling this.
+
+ `invariant_index` identifies the invariant by its position in the
+ creating `invariant_names`. Call once per invariant per join point,
+ from the same handle that makes the `hegel_state_machine_next_group`
+ calls.
+
+ Returns `HEGEL_OK`, `HEGEL_E_INVALID_ARG` when `invariant_index` is
+ outside the machine's registered invariants or `out_should_check` is
+ null, or `HEGEL_E_STOP_TEST` when the engine's choice budget is
+ exhausted (the caller should abort the body and call
+ `hegel_mark_complete` with `HEGEL_STATUS_OVERRUN`).
+ */
+hegel_result_t hegel_state_machine_should_check_invariant(hegel_context_t *ctx,
+                                                          hegel_test_case_t *tc,
+                                                          hegel_state_machine_t *state_machine,
+                                                          int64_t invariant_index,
+                                                          bool *out_should_check);
 
 /*
  Release a state-machine handle from `hegel_new_state_machine`. Safe to
@@ -1495,7 +2113,7 @@ hegel_result_t hegel_generate_date(hegel_context_t *ctx,
 /*
  Parameters:
  `min_value` / `max_value`: Inclusive bounds. Pass all-zeros and
-   `{23, 59, 59, 999999}` for the full day.
+   `{23, 59, 59, 999999999}` for the full day.
 
  Returns `HEGEL_OK` or `HEGEL_E_STOP_TEST`.
 
@@ -1573,6 +2191,383 @@ hegel_result_t hegel_target(hegel_context_t *ctx,
                             const char *label);
 
 /*
+ Record an event for the current test case, for the end-of-run
+ statistics report: the report shows, per label, the fraction of
+ generation-phase test cases in which the label was recorded at least
+ once. The report prints only when the `show_statistics` setting is on
+ (`hegel_settings_set_show_statistics`); without it events cost almost
+ nothing and report nothing.
+
+ Parameters:
+ `label`: Non-NULL, valid UTF-8.
+
+ Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` on a null / non-UTF-8
+ label.
+ */
+hegel_result_t hegel_event(hegel_context_t *ctx, hegel_test_case_t *tc, const char *label);
+
+/*
+ Record a numeric observation under `label` for the current test case,
+ for the end-of-run statistics report: the report shows, per label, a
+ summary of the observed distribution (count, min, median, mean, p90,
+ max) over generation-phase test cases. The report prints only when the
+ `show_statistics` setting is on
+ (`hegel_settings_set_show_statistics`); without it observations cost
+ almost nothing and report nothing.
+
+ Parameters:
+ `value`: The observation. Must be finite.
+ `label`: Non-NULL, valid UTF-8. Unlike `hegel_target`, a label may be
+   observed any number of times per test case.
+
+ Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` on a null / non-UTF-8
+ label or a non-finite value.
+ */
+hegel_result_t hegel_event_value(hegel_context_t *ctx,
+                                 hegel_test_case_t *tc,
+                                 double value,
+                                 const char *label);
+
+/*
+ Create a printer-options handle with every option at its default
+ (`max_width` 79).
+
+ On success writes a caller-owned handle into `*out_options` (release with
+ `hegel_printer_options_free`) and returns `HEGEL_OK`. Returns
+ `HEGEL_E_INVALID_ARG` for a NULL `out_options`.
+ */
+hegel_result_t hegel_printer_options_new(hegel_context_t *ctx,
+                                         hegel_printer_options_t **out_options);
+
+/*
+ Free an options handle previously returned by `hegel_printer_options_new`.
+ Safe to call with NULL (a no-op that returns `HEGEL_OK`).
+ */
+hegel_result_t hegel_printer_options_free(hegel_context_t *ctx, hegel_printer_options_t *options);
+
+/*
+ Set the line width documents constructed with these options are laid out
+ to: lines stay within `max_width` characters where the group structure
+ allows it. The default is 79.
+
+ Returns `HEGEL_E_INVALID_HANDLE` for a NULL `options` and
+ `HEGEL_E_INVALID_ARG` for a `max_width` of 0 (a document cannot lay
+ anything out inside zero columns).
+ */
+hegel_result_t hegel_printer_options_set_max_width(hegel_context_t *ctx,
+                                                   hegel_printer_options_t *options,
+                                                   uint64_t max_width);
+
+/*
+ Create a standalone pretty-printer document laid out per `options`
+ (NULL for all defaults; see `hegel_printer_options_t`).
+
+ On success writes a caller-owned handle into `*out_printer` (release with
+ `hegel_printer_free`) and returns `HEGEL_OK`. Returns
+ `HEGEL_E_INVALID_ARG` for a NULL `out_printer`.
+ */
+hegel_result_t hegel_printer_new(hegel_context_t *ctx,
+                                 const hegel_printer_options_t *options,
+                                 hegel_printer_t **out_printer);
+
+/*
+ Release a printer handle (from `hegel_printer_new`,
+ `hegel_printer_deferred`, or `hegel_test_case_printer`). Safe to call
+ with NULL (a no-op that returns `HEGEL_OK`). Freeing a handle never
+ discards document content — a deferred slot's content stays spliced in —
+ it only releases this reference to the shared document.
+ */
+hegel_result_t hegel_printer_free(hegel_context_t *ctx, hegel_printer_t *printer);
+
+/*
+ Emit `len` bytes of UTF-8 at `text` only if the innermost group open at
+ this point renders broken; a group that fits on one line renders nothing
+ here. The text never counts toward width (measurement uses the flat
+ form, which is empty).
+
+ This is how a layout expresses text that only the multi-line form needs
+ — e.g. Go's mandatory trailing comma before a composite literal's
+ closing brace: emit each element, then
+ `hegel_printer_if_break(",")` and an empty `hegel_printer_breakable`
+ before the `hegel_printer_end_group` that closes the literal.
+
+ The text must not contain newlines. Errors as `hegel_printer_text`.
+ */
+hegel_result_t hegel_printer_if_break(hegel_context_t *ctx,
+                                      hegel_printer_t *printer,
+                                      const uint8_t *text,
+                                      size_t len);
+
+/*
+ Emit `len` bytes of UTF-8 at `text` as literal, unbreakable text.
+
+ The text must not contain newlines: express line structure with
+ `hegel_printer_hard_break` (or breakable points) so column accounting
+ stays correct. Returns `HEGEL_E_INVALID_HANDLE` — with a diagnostic in
+ `hegel_context_last_error` — for a NULL `printer` or a handle whose
+ deferred slot is already dead, and `HEGEL_E_INVALID_ARG` for non-UTF-8
+ or newline-containing text or a NULL `text` with `len > 0`.
+ */
+hegel_result_t hegel_printer_text(hegel_context_t *ctx,
+                                  hegel_printer_t *printer,
+                                  const uint8_t *text,
+                                  size_t len);
+
+/*
+ Emit a potential break point: renders as the given separator if the
+ enclosing group fits on one line, and as a newline plus the current
+ indentation if the group breaks.
+
+ `sep` follows the same rules as `hegel_printer_text` (UTF-8, no
+ newlines, NULL only with `len == 0`), and errors are reported the same
+ way.
+ */
+hegel_result_t hegel_printer_breakable(hegel_context_t *ctx,
+                                       hegel_printer_t *printer,
+                                       const uint8_t *sep,
+                                       size_t len);
+
+/*
+ Attach a comment to the line currently being written: the text is
+ emitted verbatim at the end of that line, every group open at this
+ position is forced to break — a comment poisons the rest of its line, so
+ nothing else may share it — and the text contributes nothing to width
+ accounting. A comment-forced group also breaks before its closing text,
+ so a trailing delimiter is not annotated by a comment on the group's last
+ element.
+
+ The engine stores the text verbatim: pass the full rendered form of the
+ comment, in the comment syntax of the language being printed (e.g.
+ `"  // like this"` or `"  (* like this *)"`), including any separating
+ whitespace.
+
+ `text` follows the same rules as `hegel_printer_text` (UTF-8, no
+ newlines, NULL only with `len == 0`), and errors are reported the same
+ way.
+ */
+hegel_result_t hegel_printer_comment(hegel_context_t *ctx,
+                                     hegel_printer_t *printer,
+                                     const uint8_t *text,
+                                     size_t len);
+
+/*
+ Emit an unconditional newline followed by the current indentation.
+
+ Returns `HEGEL_E_INVALID_HANDLE` for a NULL `printer` or a handle whose
+ deferred slot is already dead.
+ */
+hegel_result_t hegel_printer_hard_break(hegel_context_t *ctx, hegel_printer_t *printer);
+
+/*
+ Open a group: emit `open` (same rules as `hegel_printer_text`), then
+ increase the indentation applied by subsequent break points by `indent`.
+ Whether to break is decided per group — a group either fits on the
+ current line or every one of its break points becomes a newline.
+
+ Errors as `hegel_printer_text`.
+ */
+hegel_result_t hegel_printer_begin_group(hegel_context_t *ctx,
+                                         hegel_printer_t *printer,
+                                         uint64_t indent,
+                                         const uint8_t *open,
+                                         size_t open_len);
+
+/*
+ Close the innermost group: undo the indentation its
+ `hegel_printer_begin_group` added, then emit `close` (same rules as
+ `hegel_printer_text`).
+
+ Errors as `hegel_printer_text`; closing with no group open is
+ `HEGEL_E_INVALID_ARG` (reported by `hegel_printer_resolve` instead when
+ the unbalanced close was recorded into a deferred session).
+ */
+hegel_result_t hegel_printer_end_group(hegel_context_t *ctx,
+                                       hegel_printer_t *printer,
+                                       const uint8_t *close,
+                                       size_t close_len);
+
+/*
+ Adjust the indentation applied by subsequent break points by `delta`
+ (may be negative to undo an earlier shift).
+
+ Returns `HEGEL_E_INVALID_HANDLE` for a NULL `printer` or a handle whose
+ deferred slot is already dead.
+ */
+hegel_result_t hegel_printer_shift_indent(hegel_context_t *ctx,
+                                          hegel_printer_t *printer,
+                                          int64_t delta);
+
+/*
+ Open a deferred hole at the handle's current position and write a
+ caller-owned handle for it into `*out_printer` (release with
+ `hegel_printer_free`).
+
+ Content written through the returned handle — at any later point, e.g.
+ while the test body runs — is spliced in at the hole's position when
+ `hegel_printer_resolve` runs on the document's root handle, with
+ line-breaking behaving exactly as if it had been printed inline. After
+ resolve the slot is dead and writes to it return
+ `HEGEL_E_INVALID_HANDLE`; use `hegel_printer_is_live` to probe. Holes
+ nest: calling this on a deferred handle opens a hole inside that slot.
+
+ Returns `HEGEL_E_INVALID_HANDLE` for a NULL `printer` or a dead slot
+ handle and `HEGEL_E_INVALID_ARG` for a NULL `out_printer`.
+ */
+hegel_result_t hegel_printer_deferred(hegel_context_t *ctx,
+                                      hegel_printer_t *printer,
+                                      hegel_printer_t **out_printer);
+
+/*
+ Open a speculative region on this handle: subsequent writes through it
+ buffer until `hegel_printer_commit_speculative` emits them or
+ `hegel_printer_abort_speculative` discards them. Regions nest. This is
+ how draw-time printing survives rejection: print each attempt inside a
+ region, commit on acceptance, abort on rejection.
+
+ Returns `HEGEL_E_INVALID_HANDLE` for a NULL `printer` or a dead slot
+ handle.
+ */
+hegel_result_t hegel_printer_begin_speculative(hegel_context_t *ctx, hegel_printer_t *printer);
+
+/*
+ Close the innermost speculative region on this handle, keeping its
+ content.
+
+ Returns `HEGEL_E_INVALID_HANDLE` for a NULL `printer` or a dead slot
+ handle and `HEGEL_E_INVALID_ARG` — with a diagnostic — when no region is
+ open.
+ */
+hegel_result_t hegel_printer_commit_speculative(hegel_context_t *ctx, hegel_printer_t *printer);
+
+/*
+ Close the innermost speculative region on this handle, discarding its
+ content. Deferred slots opened inside the region die with it.
+
+ Returns `HEGEL_E_INVALID_HANDLE` for a NULL `printer` or a dead slot
+ handle and `HEGEL_E_INVALID_ARG` — with a diagnostic — when no region is
+ open.
+ */
+hegel_result_t hegel_printer_abort_speculative(hegel_context_t *ctx, hegel_printer_t *printer);
+
+/*
+ Splice every deferred hole's content in at its position and seal the
+ document. Must be called on the document's root handle (from
+ `hegel_printer_new` / `hegel_test_case_printer`). Sealing ends all
+ writing: every slot dies, a speculative region still open on any target —
+ a straggler thread caught mid-draw — is aborted (uncommitted content was
+ never part of the document), and every later write on any handle reports
+ `HEGEL_E_INVALID_HANDLE` like any other dead region, so a straggler's
+ late writes are harmless to tolerate.
+
+ Returns `HEGEL_E_INVALID_HANDLE` for a NULL `printer`, and
+ `HEGEL_E_INVALID_ARG` — with a diagnostic — when called on a deferred
+ handle, with no deferred session outstanding, or when a recorded
+ `hegel_printer_end_group` turns out to be unbalanced at replay.
+ */
+hegel_result_t hegel_printer_resolve(hegel_context_t *ctx, hegel_printer_t *printer);
+
+/*
+ Write whether this handle can still be written to into `*out_live`:
+ `true` for a root handle, and for a deferred handle whose session has not
+ yet been resolved or aborted.
+
+ Returns `HEGEL_E_INVALID_HANDLE` for a NULL `printer` and
+ `HEGEL_E_INVALID_ARG` for a NULL `out_live`.
+ */
+hegel_result_t hegel_printer_is_live(hegel_context_t *ctx,
+                                     hegel_printer_t *printer,
+                                     bool *out_live);
+
+/*
+ Read everything printed to the document, flushing pending break points.
+ Must be called on the document's root handle. Reading seals the document
+ exactly like `hegel_printer_resolve` does: open speculative regions on
+ any target are aborted and every later write on any handle reports
+ `HEGEL_E_INVALID_HANDLE`. Reading again is fine and returns the same
+ document.
+
+ On success fills `*out_result` with an engine-allocated UTF-8 buffer the
+ caller owns (release with `hegel_printer_value_result_free`) and returns
+ `HEGEL_OK`. Returns `HEGEL_E_INVALID_HANDLE` for a NULL `printer`, and
+ `HEGEL_E_INVALID_ARG` — with a diagnostic — for a NULL `out_result`, a
+ deferred handle, or an unresolved deferred session (call
+ `hegel_printer_resolve` first).
+ */
+hegel_result_t hegel_printer_value(hegel_context_t *ctx,
+                                   hegel_printer_t *printer,
+                                   hegel_printer_value_result_t *out_result);
+
+/*
+ Release a buffer returned by `hegel_printer_value` and reset the struct
+ to `{NULL, 0}`. Safe to call with a NULL `result` or an already-freed
+ (zeroed) struct — both are no-ops that return `HEGEL_OK`.
+ */
+hegel_result_t hegel_printer_value_result_free(hegel_context_t *ctx,
+                                               hegel_printer_value_result_t *result);
+
+/*
+ Fetch a handle onto this test-case handle's *print region* of the family
+ document, writing a caller-owned handle into `*out_printer` (release
+ with `hegel_printer_free`; the document itself lives as long as any
+ handle or the family).
+
+ The family document exists from the family's creation. Each test-case
+ handle owns one region of it: the root handle's region is the document
+ body, and a `hegel_test_case_clone` handle's region is a hole opened in
+ its parent's region at the moment the clone was made. Regions make
+ concurrent printing deterministic: a clone's output appears at its
+ anchor point — where the clone was created — however the threads that
+ produced it were scheduled, and two handles never interleave within one
+ region. The document remains readable after the case completes, so the
+ client can assemble output while drawing and read it back after
+ `hegel_mark_complete` (through a root-handle printer).
+
+ `options` may be NULL for defaults (see `hegel_printer_options_t`). The
+ first call that explicitly configures `max_width` fixes the document's
+ width; later calls may restate it, but a *different* explicit width is
+ an error — the width of the shared document cannot be two things.
+ Content printed before the width is configured (`hegel_note` never
+ configures it) still renders at the configured width: layout happens
+ when the document is read.
+
+ Returns `HEGEL_E_INVALID_HANDLE` for a NULL `tc` and
+ `HEGEL_E_INVALID_ARG` — with a diagnostic — for a NULL `out_printer` or a
+ width conflict.
+ */
+hegel_result_t hegel_test_case_printer(hegel_context_t *ctx,
+                                       hegel_test_case_t *tc,
+                                       const hegel_printer_options_t *options,
+                                       hegel_printer_t **out_printer);
+
+/*
+ Append a note — `len` bytes of UTF-8 at `text` — to this test-case
+ handle's print region (see `hegel_test_case_printer` for the region
+ model). Each `\n`-separated line of the note becomes its own output
+ line, so notes may contain newlines. Notes and drawn values from *one
+ handle* appear in the order they were appended; a clone's notes appear
+ in the clone's region.
+
+ A note appended while a speculative region is open on the handle's
+ region — the client is mid-way through printing a drawn value, and the
+ note comes from inside that value's generation — is held back rather
+ than spliced into the value's line, and appended once the outermost
+ region closes, whether it is committed or aborted. Held notes are lost
+ if the document is read first (the writer was a straggler).
+
+ Notes never configure the document's width; they render at whatever
+ width ends up configured (default 79).
+
+ Returns `HEGEL_E_INVALID_HANDLE` for a NULL `tc` or a handle whose
+ region is dead (the document was already read), and
+ `HEGEL_E_INVALID_ARG` — with a diagnostic — for non-UTF-8 text or a NULL
+ `text` with `len > 0`.
+ */
+hegel_result_t hegel_note(hegel_context_t *ctx,
+                          hegel_test_case_t *tc,
+                          const uint8_t *text,
+                          size_t len);
+
+/*
  Parameters:
  `status`: A `hegel_status_t` value describing how the test case ended.
  `origin`: Identifies the origin of a failure. Used only when `status`
@@ -1602,7 +2597,8 @@ hegel_result_t hegel_mark_complete(hegel_context_t *ctx,
 /*
  Parameters:
  `out_status`: Receives `HEGEL_RUN_STATUS_PASSED`,
-   `HEGEL_RUN_STATUS_FAILED`, or `HEGEL_RUN_STATUS_ERROR`.
+   `HEGEL_RUN_STATUS_FAILED`, `HEGEL_RUN_STATUS_ERROR`, or
+   `HEGEL_RUN_STATUS_FAILED_NONDETERMINISTIC`.
 
  Returns `HEGEL_OK`.
  */

@@ -207,15 +207,18 @@ final class Run<A> {
         try check(hegel_run_result_status(ctx.raw, rawResult, &rawStatus), ctx.lastError)
 
         switch RunStatus(rawValue: rawStatus.rawValue) {
-        case .passed, nil:
+        case .passed:
             return nil
+        case nil:
+            // A status this binding does not know is not a pass.
+            throw PropertyFailure(failures: [], runError: "unknown run status \(rawStatus.rawValue)")
         case .error:
             var message: UnsafePointer<CChar>?
             _ = hegel_run_result_error(ctx.raw, rawResult, &message)
             throw PropertyFailure(
                 failures: [],
                 runError: message.map { String(cString: $0) } ?? "unknown run error")
-        case .failed:
+        case .failed, .failedNondeterministic:
             var count = 0
             try check(hegel_run_result_failure_count(ctx.raw, rawResult, &count), ctx.lastError)
             var failures: [(origin: String, blob: String?)] = []

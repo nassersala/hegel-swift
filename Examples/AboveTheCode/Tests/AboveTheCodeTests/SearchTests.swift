@@ -68,7 +68,7 @@ import AboveTheCode
     @Test(arguments: SearchViewModel.Bug.allCases)
     func seededBugIsTheFirstPairThatIsNotAStep(bug: SearchViewModel.Bug) throws {
         do {
-            try forAll(Search.behaviour(), seed: 1, database: "") { run in
+            try forAll(Search.behaviour(), seed: 3, database: "") { run in
                 if let v = Search.refines(run.events, bug: bug).violation { throw NotAStep("\(v)") }
             }
             Issue.record("\(bug) refined the relation")

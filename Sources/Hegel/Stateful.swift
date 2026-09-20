@@ -58,7 +58,9 @@ struct LabeledStepFailure: Error {
 }
 
 /// A named invariant, checked on the initial state and after every rule.
-/// Throw to fail the property.
+/// Throw to fail the property. (libhegel 0.43 samples invariants between
+/// the first and last state unless they are flagged always-check; this
+/// binding flags all of them.)
 public struct Invariant<State>: Sendable {
     public let name: String
     public let check: @Sendable (State) throws -> Void
@@ -118,25 +120,34 @@ public func forAll<State>(
         var state = try initial.run(tc)
         let initialDescription = String(describing: state)
 
+        // A sequential machine: every rule in one concurrency group, equal
+        // weights, concurrency fixed at 1 (which draws nothing), and every
+        // invariant flagged always-check, so "after every rule" stays true
+        // under an engine that otherwise samples invariants.
         var sm: OpaquePointer?
+        var concurrency: Int64 = 0
+        let groups = [Int64](repeating: 0, count: rules.count)
+        let alwaysCheck = [Bool](repeating: true, count: invariants.count)
         try withCStringArray(rules.map(\.name)) { ruleNames, ruleCount in
             try withCStringArray(invariants.map(\.name)) { invariantNames, invariantCount in
                 try tc.call(
                     hegel_new_state_machine(
                         tc.ctx.raw, tc.raw,
-                        ruleNames, ruleCount,
-                        invariantNames, invariantCount,
-                        &sm))
+                        ruleNames, groups, nil, ruleCount,
+                        invariantNames, alwaysCheck, invariantCount,
+                        1, 1, settings.resolvedStatefulStepCount,
+                        &sm, &concurrency))
             }
         }
         defer { _ = hegel_state_machine_free(tc.ctx.raw, sm) }
+        // HEGEL_STATE_MACHINE_DONE is `#define`d as INT64_MIN, a macro Swift
+        // does not import.
+        let done = Int64.min
 
-        func checkInvariants() throws {
-            for invariant in invariants {
-                do { try invariant.check(state) } catch {
-                    steps.append("invariant \(invariant.name) failed")
-                    throw error
-                }
+        func check(_ invariant: Invariant<State>) throws {
+            do { try invariant.check(state) } catch {
+                steps.append("invariant \(invariant.name) failed")
+                throw error
             }
         }
 
@@ -146,51 +157,81 @@ public func forAll<State>(
         }
 
         do {
-            try checkInvariants()
+            // The initial state is the caller's to check, unconditionally.
+            for invariant in invariants { try check(invariant) }
+            // The engine runs the machine in rounds, and this follows the
+            // reference frontend's sequential runner call for call so the
+            // choice sequences agree: a span per round that takes in the
+            // round's control draws, `next_group` at every join point
+            // including the first, rules pulled until the round's stream is
+            // exhausted, and the invariants asked about at the join.
             while true {
-                var index: Int64 = 0
-                try tc.call(hegel_state_machine_next_rule(tc.ctx.raw, tc.raw, sm, &index))
-                if index == HEGEL_STATE_MACHINE_DONE { break }
-                let rule = rules[Int(index)]
-
-                guard rule.precondition(state) else {
-                    try tc.call(hegel_state_machine_rule_rejected(tc.ctx.raw, tc.raw, sm))
-                    continue
-                }
-                // Span the rule's draws so the shrinker deletes whole steps.
-                try tc.call(hegel_start_span(
-                    tc.ctx.raw, tc.raw, UInt64(HEGEL_LABEL_STATEFUL_RULE.rawValue)))
-                // Snapshot so a rule that mutates and then rejects leaves no
-                // trace — the engine is told the step never happened, so the
-                // state must agree. (A copy only isolates value semantics:
-                // state reached through references in State is the rule
-                // author's responsibility, as in Hypothesis.)
-                let snapshot = state
-                let label: String
+                try tc.call(hegel_start_span(tc.ctx.raw, tc.raw, TestCase.statefulRuleLabel))
+                var group: Int64 = 0
                 do {
-                    label = try rule.labeledStep(&state, tc)
-                    _ = hegel_stop_span(tc.ctx.raw, tc.raw, false)
-                } catch HegelError.assume {
-                    // The rule rejected its drawn arguments: roll back the
-                    // state, discard the span, and tell the engine the step
-                    // didn't count.
-                    state = snapshot
-                    _ = hegel_stop_span(tc.ctx.raw, tc.raw, true)
-                    try tc.call(hegel_state_machine_rule_rejected(tc.ctx.raw, tc.raw, sm))
-                    continue
-                } catch let failure as LabeledStepFailure {
-                    _ = hegel_stop_span(tc.ctx.raw, tc.raw, true)
-                    steps.append("\(failure.label) failed")
-                    throw failure.underlying
+                    try tc.call(hegel_state_machine_next_group(tc.ctx.raw, tc.raw, sm, &group))
                 } catch {
-                    _ = hegel_stop_span(tc.ctx.raw, tc.raw, true)
-                    steps.append("\(rule.name) failed")
+                    _ = hegel_stop_span(tc.ctx.raw, tc.raw, false)
                     throw error
                 }
-                steps.append(label)
-                try checkInvariants()
+                if group == done {
+                    _ = hegel_stop_span(tc.ctx.raw, tc.raw, false)
+                    break
+                }
+
+                var roundRejected = false
+                do {
+                    while true {
+                        var index: Int64 = 0
+                        try tc.call(hegel_state_machine_next_rule(tc.ctx.raw, tc.raw, sm, 0, &index))
+                        if index == done { break }
+                        let rule = rules[Int(index)]
+
+                        guard rule.precondition(state) else {
+                            try tc.call(hegel_state_machine_rule_rejected(tc.ctx.raw, tc.raw, sm, 0))
+                            roundRejected = true
+                            continue
+                        }
+                        // Snapshot so a rule that mutates and then rejects
+                        // leaves no trace — the engine is told the step never
+                        // happened, so the state must agree. (A copy only
+                        // isolates value semantics: state reached through
+                        // references in State is the rule author's
+                        // responsibility, as in Hypothesis.)
+                        let snapshot = state
+                        do {
+                            steps.append(try rule.labeledStep(&state, tc))
+                        } catch HegelError.assume {
+                            // The rule rejected its drawn arguments: roll back
+                            // the state and tell the engine the step didn't
+                            // count. The round's span is discarded below.
+                            state = snapshot
+                            try tc.call(hegel_state_machine_rule_rejected(tc.ctx.raw, tc.raw, sm, 0))
+                            roundRejected = true
+                        } catch let failure as LabeledStepFailure {
+                            steps.append("\(failure.label) failed")
+                            throw failure.underlying
+                        } catch {
+                            steps.append("\(rule.name) failed")
+                            throw error
+                        }
+                    }
+                } catch {
+                    _ = hegel_stop_span(tc.ctx.raw, tc.raw, false)
+                    throw error
+                }
+                _ = hegel_stop_span(tc.ctx.raw, tc.raw, roundRejected)
+
+                for (index, invariant) in invariants.enumerated() {
+                    var due = false
+                    try tc.call(hegel_state_machine_should_check_invariant(
+                        tc.ctx.raw, tc.raw, sm, Int64(index), &due))
+                    if due { try check(invariant) }
+                }
                 observe()
             }
+            // The final state was checked at the last join point: every
+            // invariant is always-check, so there is nothing left to do here.
             if let bestScore {
                 try tc.call(hegel_target(tc.ctx.raw, tc.raw, bestScore, "stateful.maximize"))
             }

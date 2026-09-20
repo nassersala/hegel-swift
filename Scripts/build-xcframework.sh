@@ -19,7 +19,11 @@
 #   rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 set -euo pipefail
 
-TAG="v0.32.5"
+# Upstream tags the C library apart from the Rust crate: libhegel-vX.Y.Z is
+# hegeltest-c (what is built here); the bare vX.Y.Z on the same commit is
+# the hegeltest crate, a different number.
+TAG="libhegel-v0.43.1"
+VERSION="${TAG#libhegel-v}"
 MACOS_MIN="14.0"
 IOS_MIN="17.0"
 
@@ -44,9 +48,11 @@ if [[ -z "$HEGEL_RUST" ]]; then
     exit 2
 fi
 
-DESCRIBED=$(git -C "$HEGEL_RUST" describe --tags --exact-match 2>/dev/null || true)
-if [[ "$DESCRIBED" != "$TAG" ]]; then
-    echo "error: $HEGEL_RUST is at '${DESCRIBED:-<no tag>}', need $TAG" >&2
+# A commit can carry both tags, so ask for the tags at HEAD rather than
+# the one `git describe` happens to pick.
+AT_HEAD=$(git -C "$HEGEL_RUST" tag --points-at HEAD 2>/dev/null || true)
+if ! grep -qx "$TAG" <<< "$AT_HEAD"; then
+    echo "error: $HEGEL_RUST is at '$(tr '\n' ' ' <<< "${AT_HEAD:-<no tag>}")', need $TAG" >&2
     echo "hint: git clone --branch $TAG --depth 1 https://github.com/hegeldev/hegel-rust" >&2
     exit 1
 fi
@@ -78,8 +84,8 @@ write_info_plist() {  # $1 = path, $2 = platform key, $3 = min-version key/value
     <key>CFBundleName</key><string>CHegel</string>
     <key>CFBundleExecutable</key><string>CHegel</string>
     <key>CFBundlePackageType</key><string>FMWK</string>
-    <key>CFBundleShortVersionString</key><string>${TAG#v}</string>
-    <key>CFBundleVersion</key><string>${TAG#v}</string>
+    <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+    <key>CFBundleVersion</key><string>${VERSION}</string>
     <key>CFBundleSupportedPlatforms</key><array><string>$2</string></array>
     $3
 </dict>

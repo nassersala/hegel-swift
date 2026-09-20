@@ -57,4 +57,9 @@ public enum RunStatus: UInt32 {
     case passed = 0  // HEGEL_RUN_STATUS_PASSED
     case failed = 1  // HEGEL_RUN_STATUS_FAILED
     case error = 2   // HEGEL_RUN_STATUS_ERROR — no verdict on the property
+    /// HEGEL_RUN_STATUS_FAILED_NONDETERMINISTIC: a failure from a run that
+    /// created a state machine with `max_concurrency > 1`, so it was not
+    /// shrunk and carries no blob. This binding only creates sequential
+    /// machines; the case is here so the status is never misread.
+    case failedNondeterministic = 3
 }
